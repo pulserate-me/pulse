@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'Playfair Display';
+  src: url('/assets/fonts/PlayfairDisplay.woff2') format('woff2');
+  font-weight: 400 800;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('/assets/fonts/Satoshi.woff2') format('woff2');
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+    /* Dark gold luxury theme */
+    --background: 0.08 0.006 55;
+    --foreground: 0.92 0.01 70;
+    --card: 0.11 0.007 55;
+    --card-foreground: 0.92 0.01 70;
+    --popover: 0.10 0.007 55;
+    --popover-foreground: 0.92 0.01 70;
+    --primary: 0.76 0.13 72;
+    --primary-foreground: 0.08 0.004 55;
+    --secondary: 0.14 0.008 55;
+    --secondary-foreground: 0.85 0.01 70;
+    --muted: 0.16 0.007 55;
+    --muted-foreground: 0.55 0.01 70;
+    --accent: 0.82 0.15 72;
+    --accent-foreground: 0.08 0.004 55;
+    --destructive: 0.55 0.22 25;
+    --destructive-foreground: 0.95 0.01 70;
+    --border: 0.20 0.008 55;
+    --input: 0.14 0.007 55;
+    --ring: 0.76 0.13 72;
+    --chart-1: 0.76 0.13 72;
+    --chart-2: 0.60 0.11 180;
+    --chart-3: 0.65 0.14 120;
+    --chart-4: 0.72 0.12 30;
+    --chart-5: 0.80 0.10 260;
+    --sidebar: 0.095 0.007 55;
+    --sidebar-foreground: 0.92 0.01 70;
+    --sidebar-primary: 0.76 0.13 72;
+    --sidebar-primary-foreground: 0.08 0.004 55;
+    --sidebar-accent: 0.14 0.008 55;
+    --sidebar-accent-foreground: 0.92 0.01 70;
+    --sidebar-border: 0.18 0.008 55;
+    --sidebar-ring: 0.76 0.13 72;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(var(--border)) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: oklch(var(--border));
+    border-radius: 2px;
+  }
+
+  .gold-shimmer {
+    background: linear-gradient(
+      90deg,
+      oklch(0.76 0.13 72) 0%,
+      oklch(0.90 0.16 80) 40%,
+      oklch(0.76 0.13 72) 70%,
+      oklch(0.65 0.11 65) 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: shimmer 3s linear infinite;
+  }
+
+  @keyframes shimmer {
+    to { background-position: 200% center; }
+  }
+
+  .message-bubble-sent {
+    background: linear-gradient(
+      135deg,
+      oklch(0.22 0.04 72) 0%,
+      oklch(0.18 0.03 65) 100%
+    );
+    border: 1px solid oklch(0.76 0.13 72 / 0.25);
+  }
+
+  .message-bubble-received {
+    background: oklch(var(--card));
+    border: 1px solid oklch(var(--border));
+  }
+
+  .noise-overlay::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Chat input area safe area padding for iOS */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
