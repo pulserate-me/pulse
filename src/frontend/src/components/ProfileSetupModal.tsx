@@ -8,6 +8,7 @@ import { motion } from "motion/react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useMediaUpload } from "../hooks/useMediaUpload";
+import { requestNotificationPermission } from "../hooks/usePushNotifications";
 import { useSaveCallerUserProfile } from "../hooks/useQueries";
 
 function getInitials(name: string) {
@@ -77,6 +78,8 @@ export default function ProfileSetupModal({ onProfileCreated }: Props) {
         ...(avatarUrl ? { avatarUrl } : {}),
       });
       toast.success("Profile created! Welcome to Pulse.");
+      // Request notification permission non-blocking after profile is saved
+      requestNotificationPermission();
       onProfileCreated?.();
     } catch {
       toast.error("Failed to create profile. Please try again.");

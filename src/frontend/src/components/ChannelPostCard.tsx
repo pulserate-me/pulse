@@ -34,7 +34,7 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   useCommentOnChannelPost,
@@ -70,6 +70,156 @@ function formatTime(ts: bigint): string {
   return new Date(ms).toLocaleDateString();
 }
 
+function extractYouTubeId(url: string): string | null {
+  const pattern =
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([^&?/\s]+)/;
+  const m = url.match(pattern);
+  return m ? m[1] : null;
+}
+
+function extractTikTokId(url: string): string | null {
+  // Match /video/DIGITS in the URL path (handles full URLs)
+  const m = url.match(/\/video\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+function TikTokEmbed({ url }: { url: string }) {
+  const videoId = extractTikTokId(url);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const injectedRef = useRef(false);
+
+  useEffect(() => {
+    if (videoId) return; // handled by iframe below
+    if (injectedRef.current) return;
+    injectedRef.current = true;
+    setLoading(true);
+    setFailed(false);
+    fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.html && containerRef.current) {
+          containerRef.current.innerHTML = data.html;
+        } else {
+          setFailed(true);
+        }
+      })
+      .catch(() => setFailed(true))
+      .finally(() => setLoading(false));
+  }, [url, videoId]);
+
+  // For full URLs with video ID -- direct iframe
+  if (videoId) {
+    return (
+      <div
+        className="w-full overflow-hidden rounded-xl"
+        style={{ maxHeight: 560 }}
+      >
+        <iframe
+          src={`https://www.tiktok.com/embed/v2/${videoId}`}
+          className="w-full"
+          style={{ height: 560, border: "none" }}
+          allow="autoplay; encrypted-media"
+          allowFullScreen
+          title="TikTok video"
+          scrolling="no"
+        />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div
+        className="w-full rounded-xl flex items-center justify-center py-8"
+        style={{ background: "oklch(0.18 0.02 240)" }}
+      >
+        <Loader2
+          className="h-6 w-6 animate-spin"
+          style={{ color: "oklch(0.82 0.15 72)" }}
+        />
+      </div>
+    );
+  }
+
+  if (failed) {
+    return (
+      <div
+        className="w-full rounded-xl p-4 flex items-center gap-3"
+        style={{
+          background: "oklch(0.18 0.02 240)",
+          border: "1px solid oklch(0.28 0.02 240)",
+        }}
+      >
+        <div
+          className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+          style={{ background: "oklch(0.12 0.01 240)" }}
+        >
+          <span className="text-white font-bold text-sm">TT</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground">TikTok Video</p>
+          <p className="text-xs text-muted-foreground truncate">{url}</p>
+        </div>
+        <a href={url} target="_blank" rel="noopener noreferrer">
+          <Button size="sm" variant="outline" className="shrink-0 text-xs">
+            Watch
+          </Button>
+        </a>
+      </div>
+    );
+  }
+
+  // oEmbed HTML injected via ref -- React never touches this div's innerHTML
+  return (
+    <div ref={containerRef} className="w-full rounded-xl overflow-hidden" />
+  );
+}
+
+function XEmbedCard({ url }: { url: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const injectedRef = useRef(false);
+
+  useEffect(() => {
+    if (injectedRef.current || !containerRef.current) return;
+    injectedRef.current = true;
+
+    fetch(
+      `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`,
+    )
+      .then((r) => r.json())
+      .then((data: { html?: string }) => {
+        if (!containerRef.current || !data.html) return;
+        // Set innerHTML directly -- React never touches this div again
+        containerRef.current.innerHTML = data.html;
+        // Load (or re-run) widgets.js to upgrade the blockquote to an iframe
+        if ((window as any).twttr?.widgets) {
+          (window as any).twttr.widgets.load(containerRef.current);
+        } else {
+          const script = document.createElement("script");
+          script.src = "https://platform.twitter.com/widgets.js";
+          script.async = true;
+          script.charset = "utf-8";
+          document.head.appendChild(script);
+        }
+      })
+      .catch(() => {
+        if (containerRef.current) {
+          containerRef.current.innerHTML = `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:inherit">View post on X</a>`;
+        }
+      });
+  }, [url]);
+
+  // Return a div that React never re-renders children into (no children in JSX)
+  return (
+    <div
+      ref={containerRef}
+      className="px-1 pb-1 [&_iframe]:max-w-full [&_.twitter-tweet]:mx-0"
+    />
+  );
+}
+
 interface ChannelPostCardProps {
   post: ChannelPost;
   authorName: string;
@@ -85,7 +235,7 @@ export default function ChannelPostCard({
   post,
   authorName,
   authorAvatar,
-  isOwner,
+  isOwner: _isOwner,
   isPostAuthor,
   currentUserId,
   channelId,
@@ -97,6 +247,7 @@ export default function ChannelPostCard({
   const [editOpen, setEditOpen] = useState(false);
   const [editText, setEditText] = useState(post.content.text);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [showFullText, setShowFullText] = useState(false);
 
   const { data: interactions } = useGetChannelPostInteractions(post.id);
   const likePost = useLikeChannelPost();
@@ -148,6 +299,8 @@ export default function ChannelPostCard({
   };
 
   const mediaKind = post.content.mediaType?.__kind__;
+  const embedVariant =
+    mediaKind === "other" ? (post.content.mediaType as any)?.other : null;
   const ocid = index + 1;
 
   return (
@@ -176,7 +329,7 @@ export default function ChannelPostCard({
           </p>
         </div>
 
-        {/* Edit/Delete menu for owner */}
+        {/* Edit/Delete menu for post author */}
         {isPostAuthor && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -215,42 +368,107 @@ export default function ChannelPostCard({
       </div>
 
       {/* Text content */}
-      {post.content.text && (
-        <p className="px-4 pb-3 text-sm text-foreground/90 leading-relaxed">
-          {post.content.text}
-        </p>
-      )}
+      {post.content.text &&
+        (() => {
+          const words = post.content.text.trim().split(/\s+/);
+          const isLong = words.length > 69;
+          const displayText =
+            isLong && !showFullText
+              ? `${words.slice(0, 69).join(" ")}…`
+              : post.content.text;
+          return (
+            <div className="px-4 pb-3">
+              <p className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+                {displayText}
+              </p>
+              {isLong && (
+                <button
+                  type="button"
+                  onClick={() => setShowFullText(!showFullText)}
+                  className="text-xs font-semibold mt-1"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                >
+                  {showFullText ? "Show less" : "Read more"}
+                </button>
+              )}
+            </div>
+          );
+        })()}
 
-      {/* Media */}
+      {/* Image media */}
       {post.content.mediaUrl && mediaKind === "image" && (
-        <img
-          src={post.content.mediaUrl}
-          alt="Post media"
-          className="w-full max-h-80 object-cover"
-        />
+        <div className="w-full pb-3">
+          <img
+            src={post.content.mediaUrl}
+            alt="Post media"
+            className="w-full max-h-80 object-cover"
+          />
+        </div>
       )}
 
+      {/* Video media */}
       {post.content.mediaUrl && mediaKind === "video" && (
-        // biome-ignore lint/a11y/useMediaCaption: user-uploaded content
-        <video
-          src={post.content.mediaUrl}
-          controls
-          muted
-          playsInline
-          data-webkit-playsinline="true"
-          className="w-full max-h-80 object-cover"
-          style={{ WebkitTransform: "translateZ(0)" }}
-        />
+        <div className="w-full pb-3">
+          {/* biome-ignore lint/a11y/useMediaCaption: user-uploaded content */}
+          <video
+            src={post.content.mediaUrl}
+            controls
+            muted
+            playsInline
+            data-webkit-playsinline="true"
+            className="w-full max-h-80 object-cover"
+            style={{ WebkitTransform: "translateZ(0)" }}
+          />
+        </div>
       )}
 
+      {/* Audio media */}
       {post.content.mediaUrl && mediaKind === "audio" && (
-        // biome-ignore lint/a11y/useMediaCaption: user-uploaded content
-        <audio
-          src={post.content.mediaUrl}
-          controls
-          className="w-full px-4 pb-3"
-        />
+        <div className="px-4 pb-3">
+          {/* biome-ignore lint/a11y/useMediaCaption: user-uploaded content */}
+          <audio src={post.content.mediaUrl} controls className="w-full" />
+        </div>
       )}
+
+      {/* YouTube embed */}
+      {post.content.mediaUrl &&
+        mediaKind === "other" &&
+        embedVariant === "embedYouTube" &&
+        (() => {
+          const videoId = extractYouTubeId(post.content.mediaUrl!);
+          if (!videoId) return null;
+          return (
+            <div className="px-4 pb-3">
+              <div className="w-full overflow-hidden rounded-xl">
+                <iframe
+                  src={`https://www.youtube.com/embed/${videoId}`}
+                  className="w-full aspect-video"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  title="YouTube video"
+                />
+              </div>
+            </div>
+          );
+        })()}
+
+      {/* TikTok embed */}
+      {post.content.mediaUrl &&
+        mediaKind === "other" &&
+        embedVariant === "embedTikTok" && (
+          <div className="px-4 pb-3">
+            <TikTokEmbed url={post.content.mediaUrl!} />
+          </div>
+        )}
+
+      {/* X / Twitter embed */}
+      {post.content.mediaUrl &&
+        mediaKind === "other" &&
+        embedVariant === "embedX" && (
+          <div className="px-4 pb-3">
+            <XEmbedCard url={post.content.mediaUrl} />
+          </div>
+        )}
 
       {/* Action bar */}
       <div className="flex items-center gap-1 px-3 py-2 border-t border-border/50">
@@ -258,7 +476,7 @@ export default function ChannelPostCard({
           type="button"
           data-ocid={`channel.post.toggle.${ocid}`}
           onClick={handleLike}
-          disabled={isOwner}
+          disabled={isPostAuthor}
           className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-40"
           aria-label={likedByMe ? "Unlike" : "Like"}
         >
@@ -339,7 +557,7 @@ export default function ChannelPostCard({
             </div>
           )}
 
-          {!isOwner && (
+          {!isPostAuthor && (
             <div className="flex gap-2">
               <Input
                 data-ocid={`channel.post.input.${ocid}`}

@@ -1,3 +1,4 @@
+import { useActor } from "@caffeineai/core-infrastructure";
 import { Principal } from "@icp-sdk/core/principal";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -12,12 +13,7 @@ import type {
   UserId,
   UserProfile,
 } from "../backend";
-import type { backendInterface as ExtendedBackendInterface } from "../backend.d";
-import { useActor } from "./useActor";
-
-function extActor(actor: unknown): ExtendedBackendInterface {
-  return actor as ExtendedBackendInterface;
-}
+import { createActor } from "../backend";
 
 // ─── Shared types (not in backend.d.ts yet) ───────────────────────────────────
 export type ChannelId = bigint;
@@ -31,6 +27,7 @@ export interface Channel {
   avatarUrl?: string;
   owner: UserId;
   createdAt: bigint;
+  category?: string;
 }
 
 export interface ChannelWithMeta {
@@ -70,7 +67,7 @@ export interface ChannelPostInteractions {
 // ─── Existing hooks ───────────────────────────────────────────────────────────
 
 export function useGetCallerUserProfile() {
-  const { actor, isFetching: actorFetching } = useActor();
+  const { actor, isFetching: actorFetching } = useActor(createActor);
 
   const query = useQuery<UserProfile | null>({
     queryKey: ["currentUserProfile"],
@@ -90,7 +87,7 @@ export function useGetCallerUserProfile() {
 }
 
 export function useSaveCallerUserProfile() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (profile: UserProfile) => {
@@ -104,7 +101,7 @@ export function useSaveCallerUserProfile() {
 }
 
 export function useListUserConversations() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<Conversation[]>({
     queryKey: ["conversations"],
     queryFn: async () => {
@@ -117,7 +114,7 @@ export function useListUserConversations() {
 }
 
 export function useGetMessages(conversationId: ConversationId | null) {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<Message[]>({
     queryKey: ["messages", conversationId?.toString()],
     queryFn: async () => {
@@ -130,7 +127,7 @@ export function useGetMessages(conversationId: ConversationId | null) {
 }
 
 export function useGetUserProfile(userId: string | null) {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<UserProfile | null>({
     queryKey: ["userProfile", userId],
     queryFn: async () => {
@@ -147,7 +144,7 @@ export function useGetUserProfile(userId: string | null) {
 }
 
 export function useIsUserOnline(userId: string | null) {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<boolean>({
     queryKey: ["online", userId],
     queryFn: async () => {
@@ -164,7 +161,7 @@ export function useIsUserOnline(userId: string | null) {
 }
 
 export function useSearchUserByUsername() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   return useMutation({
     mutationFn: async (username: string) => {
       if (!actor) throw new Error("Actor not available");
@@ -174,7 +171,7 @@ export function useSearchUserByUsername() {
 }
 
 export function useSendMessage() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -197,7 +194,7 @@ export function useSendMessage() {
 }
 
 export function useEditMessage(conversationId: ConversationId | null) {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -205,11 +202,7 @@ export function useEditMessage(conversationId: ConversationId | null) {
       newText,
     }: { messageId: bigint; newText: string }) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).editMessage(
-        BigInt(conversationId!),
-        messageId,
-        newText,
-      );
+      await actor.editMessage(BigInt(conversationId!), messageId, newText);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -221,12 +214,12 @@ export function useEditMessage(conversationId: ConversationId | null) {
 }
 
 export function useDeleteMessage(conversationId: ConversationId | null) {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (messageId: bigint) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).deleteMessage(BigInt(conversationId!), messageId);
+      await actor.deleteMessage(BigInt(conversationId!), messageId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -238,7 +231,7 @@ export function useDeleteMessage(conversationId: ConversationId | null) {
 }
 
 export function useCreateDirectConversation() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (otherUser: UserId) => {
@@ -252,7 +245,7 @@ export function useCreateDirectConversation() {
 }
 
 export function useCreateGroupConversation() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -265,11 +258,7 @@ export function useCreateGroupConversation() {
       avatarUrl?: string;
     }) => {
       if (!actor) throw new Error("Actor not available");
-      return extActor(actor).createGroupConversation(
-        name,
-        members,
-        avatarUrl ?? null,
-      );
+      return actor.createGroupConversation(name, members, avatarUrl ?? null);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -279,7 +268,7 @@ export function useCreateGroupConversation() {
 }
 
 export function useMarkMessagesAsRead() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (conversationId: ConversationId) => {
@@ -296,7 +285,7 @@ export function useMarkMessagesAsRead() {
 }
 
 export function useUpdateLastSeen() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   return useMutation({
     mutationFn: async () => {
       if (!actor) throw new Error("Actor not available");
@@ -306,7 +295,7 @@ export function useUpdateLastSeen() {
 }
 
 export function useAddStatus() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (content: StatusContent) => {
@@ -322,7 +311,7 @@ export function useAddStatus() {
 }
 
 export function useGetMyStatuses() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<Status[]>({
     queryKey: ["myStatuses"],
     queryFn: async () => {
@@ -335,7 +324,7 @@ export function useGetMyStatuses() {
 }
 
 export function useGetContactStatuses() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<Array<[UserProfile, Array<Status>]>>({
     queryKey: ["contactStatuses"],
     queryFn: async () => {
@@ -348,12 +337,12 @@ export function useGetContactStatuses() {
 }
 
 export function useGetAllStories() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<Array<[UserProfile, Array<Status>]>>({
     queryKey: ["allStories"],
     queryFn: async () => {
       if (!actor) return [];
-      return extActor(actor).getAllStories();
+      return actor.getAllStories();
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 30000,
@@ -361,7 +350,7 @@ export function useGetAllStories() {
 }
 
 export function useUpdateCallerBio() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (bio: string) => {
@@ -375,7 +364,7 @@ export function useUpdateCallerBio() {
 }
 
 export function useUpdateCallerAvatar() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (avatarUrl: string) => {
@@ -389,7 +378,7 @@ export function useUpdateCallerAvatar() {
 }
 
 export function useUpdateCallerDisplayName() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (displayName: string) => {
@@ -403,12 +392,12 @@ export function useUpdateCallerDisplayName() {
 }
 
 export function useLikeStatus() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (statusId: StatusId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).likeStatus(statusId);
+      await actor.likeStatus(statusId);
     },
     onSuccess: (_, statusId) => {
       queryClient.invalidateQueries({
@@ -419,12 +408,12 @@ export function useLikeStatus() {
 }
 
 export function useUnlikeStatus() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (statusId: StatusId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).unlikeStatus(statusId);
+      await actor.unlikeStatus(statusId);
     },
     onSuccess: (_, statusId) => {
       queryClient.invalidateQueries({
@@ -435,7 +424,7 @@ export function useUnlikeStatus() {
 }
 
 export function useCommentOnStatus() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -443,7 +432,7 @@ export function useCommentOnStatus() {
       text,
     }: { statusId: StatusId; text: string }) => {
       if (!actor) throw new Error("Actor not available");
-      return extActor(actor).commentOnStatus(statusId, text);
+      return actor.commentOnStatus(statusId, text);
     },
     onSuccess: (_, { statusId }) => {
       queryClient.invalidateQueries({
@@ -454,12 +443,12 @@ export function useCommentOnStatus() {
 }
 
 export function useGetStatusInteractions(statusId: StatusId | null) {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery({
     queryKey: ["statusInteractions", statusId?.toString()],
     queryFn: async () => {
       if (!actor || statusId === null) return null;
-      return extActor(actor).getStatusInteractions(statusId);
+      return actor.getStatusInteractions(statusId);
     },
     enabled: !!actor && !isFetching && statusId !== null,
     refetchInterval: 5000,
@@ -469,12 +458,12 @@ export function useGetStatusInteractions(statusId: StatusId | null) {
 // ─── Channel hooks ────────────────────────────────────────────────────────────
 
 export function useGetAllChannels() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<ChannelWithMeta[]>({
     queryKey: ["channels"],
     queryFn: async () => {
       if (!actor) return [];
-      return extActor(actor).getAllChannels();
+      return actor.getAllChannels();
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 15000,
@@ -482,12 +471,12 @@ export function useGetAllChannels() {
 }
 
 export function useGetChannel(channelId: ChannelId | null) {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<ChannelWithMeta | null>({
     queryKey: ["channel", channelId?.toString()],
     queryFn: async () => {
       if (!actor || channelId === null) return null;
-      return extActor(actor).getChannel(channelId);
+      return actor.getChannel(channelId);
     },
     enabled: !!actor && !isFetching && channelId !== null,
     refetchInterval: 10000,
@@ -495,23 +484,26 @@ export function useGetChannel(channelId: ChannelId | null) {
 }
 
 export function useCreateChannel() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
       name,
       description,
       avatarUrl,
+      category,
     }: {
       name: string;
       description: string;
       avatarUrl?: string;
+      category?: string;
     }) => {
       if (!actor) throw new Error("Actor not available");
-      return extActor(actor).createChannel(
+      return actor.createChannel(
         name,
         description,
         avatarUrl ?? null,
+        category ?? null,
       );
     },
     onSuccess: () => {
@@ -521,7 +513,7 @@ export function useCreateChannel() {
 }
 
 export function useUpdateChannel() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -529,18 +521,21 @@ export function useUpdateChannel() {
       name,
       description,
       avatarUrl,
+      category,
     }: {
       channelId: ChannelId;
       name: string;
       description: string;
       avatarUrl?: string;
+      category?: string;
     }) => {
       if (!actor) throw new Error("Actor not available");
-      return extActor(actor).updateChannel(
+      return actor.updateChannel(
         channelId,
         name,
         description,
         avatarUrl ?? null,
+        category ?? null,
       );
     },
     onSuccess: (_, { channelId }) => {
@@ -552,13 +547,26 @@ export function useUpdateChannel() {
   });
 }
 
+export function useGetChannelsByCategory(category: string | null) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<ChannelWithMeta[]>({
+    queryKey: ["channelsByCategory", category],
+    queryFn: async () => {
+      if (!actor || !category) return [];
+      return actor.getChannelsByCategory(category);
+    },
+    enabled: !!actor && !isFetching && !!category,
+    refetchInterval: 15000,
+  });
+}
+
 export function useFollowChannel() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (channelId: ChannelId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).followChannel(channelId);
+      await actor.followChannel(channelId);
     },
     onSuccess: (_, channelId) => {
       queryClient.invalidateQueries({ queryKey: ["channels"] });
@@ -570,12 +578,12 @@ export function useFollowChannel() {
 }
 
 export function useUnfollowChannel() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (channelId: ChannelId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).unfollowChannel(channelId);
+      await actor.unfollowChannel(channelId);
     },
     onSuccess: (_, channelId) => {
       queryClient.invalidateQueries({ queryKey: ["channels"] });
@@ -587,12 +595,12 @@ export function useUnfollowChannel() {
 }
 
 export function useGetChannelPosts(channelId: ChannelId | null) {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<ChannelPost[]>({
     queryKey: ["channelPosts", channelId?.toString()],
     queryFn: async () => {
       if (!actor || channelId === null) return [];
-      return extActor(actor).getChannelPosts(channelId);
+      return actor.getChannelPosts(channelId);
     },
     enabled: !!actor && !isFetching && channelId !== null,
     refetchInterval: 10000,
@@ -600,12 +608,12 @@ export function useGetChannelPosts(channelId: ChannelId | null) {
 }
 
 export function useAddChannelPost(channelId: ChannelId | null) {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (content: ChannelPostContent) => {
       if (!actor || channelId === null) throw new Error("Actor not available");
-      return extActor(actor).addChannelPost(channelId, content);
+      return actor.addChannelPost(channelId, content);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -616,12 +624,12 @@ export function useAddChannelPost(channelId: ChannelId | null) {
 }
 
 export function useGetChannelPostInteractions(postId: ChannelPostId | null) {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<ChannelPostInteractions | null>({
     queryKey: ["channelPostInteractions", postId?.toString()],
     queryFn: async () => {
       if (!actor || postId === null) return null;
-      return extActor(actor).getChannelPostInteractions(postId);
+      return actor.getChannelPostInteractions(postId);
     },
     enabled: !!actor && !isFetching && postId !== null,
     refetchInterval: 10000,
@@ -629,12 +637,12 @@ export function useGetChannelPostInteractions(postId: ChannelPostId | null) {
 }
 
 export function useLikeChannelPost() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (postId: ChannelPostId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).likeChannelPost(postId);
+      await actor.likeChannelPost(postId);
     },
     onSuccess: (_, postId) => {
       queryClient.invalidateQueries({
@@ -645,12 +653,12 @@ export function useLikeChannelPost() {
 }
 
 export function useUnlikeChannelPost() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (postId: ChannelPostId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).unlikeChannelPost(postId);
+      await actor.unlikeChannelPost(postId);
     },
     onSuccess: (_, postId) => {
       queryClient.invalidateQueries({
@@ -661,7 +669,7 @@ export function useUnlikeChannelPost() {
 }
 
 export function useCommentOnChannelPost() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -669,7 +677,7 @@ export function useCommentOnChannelPost() {
       text,
     }: { postId: ChannelPostId; text: string }) => {
       if (!actor) throw new Error("Actor not available");
-      return extActor(actor).commentOnChannelPost(postId, text);
+      return actor.commentOnChannelPost(postId, text);
     },
     onSuccess: (_, { postId }) => {
       queryClient.invalidateQueries({
@@ -680,7 +688,7 @@ export function useCommentOnChannelPost() {
 }
 
 export function useForwardChannelPost() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -691,7 +699,7 @@ export function useForwardChannelPost() {
       conversationId: ConversationId;
     }) => {
       if (!actor) throw new Error("Actor not available");
-      return extActor(actor).forwardChannelPost(postId, conversationId);
+      return actor.forwardChannelPost(postId, conversationId);
     },
     onSuccess: (_, { conversationId }) => {
       queryClient.invalidateQueries({
@@ -703,12 +711,12 @@ export function useForwardChannelPost() {
 }
 
 export function useDeleteChannel() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (channelId: ChannelId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).deleteChannel(channelId);
+      await actor.deleteChannel(channelId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["channels"] });
@@ -717,12 +725,12 @@ export function useDeleteChannel() {
 }
 
 export function useDeleteChannelPost(channelId: ChannelId | null) {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (postId: ChannelPostId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).deleteChannelPost(postId);
+      await actor.deleteChannelPost(postId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -733,7 +741,7 @@ export function useDeleteChannelPost(channelId: ChannelId | null) {
 }
 
 export function useEditChannelPost(channelId: ChannelId | null) {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -741,7 +749,7 @@ export function useEditChannelPost(channelId: ChannelId | null) {
       content,
     }: { postId: ChannelPostId; content: ChannelPostContent }) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).editChannelPost(postId, content);
+      await actor.editChannelPost(postId, content);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -752,12 +760,12 @@ export function useEditChannelPost(channelId: ChannelId | null) {
 }
 
 export function useGetGroupAvatars() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<Array<[ConversationId, string]>>({
     queryKey: ["groupAvatars"],
     queryFn: async () => {
       if (!actor) return [];
-      return (actor as any).getGroupAvatars();
+      return actor.getGroupAvatars();
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 30000,
@@ -765,7 +773,7 @@ export function useGetGroupAvatars() {
 }
 
 export function useUpdateGroupAvatar() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -786,12 +794,12 @@ export function useUpdateGroupAvatar() {
 }
 
 export function useLeaveConversation() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (conversationId: ConversationId) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).leaveConversation(conversationId);
+      await actor.leaveConversation(conversationId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -805,12 +813,12 @@ import type { GoldTransaction } from "../backend.d";
 export type { GoldTransaction };
 
 export function useGetMyGoldBalance() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<bigint>({
     queryKey: ["goldBalance"],
     queryFn: async () => {
       if (!actor) return BigInt(0);
-      return extActor(actor).getMyGoldBalance();
+      return actor.getMyGoldBalance();
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 10000,
@@ -818,12 +826,12 @@ export function useGetMyGoldBalance() {
 }
 
 export function useGetMyTransactionHistory() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<GoldTransaction[]>({
     queryKey: ["goldTransactions"],
     queryFn: async () => {
       if (!actor) return [];
-      return extActor(actor).getMyTransactionHistory();
+      return actor.getMyTransactionHistory();
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 10000,
@@ -831,24 +839,24 @@ export function useGetMyTransactionHistory() {
 }
 
 export function useGetAdminTotalClaimed() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<bigint>({
     queryKey: ["adminTotalClaimed"],
     queryFn: async () => {
       if (!actor) return BigInt(0);
-      return extActor(actor).getAdminTotalClaimed();
+      return actor.getAdminTotalClaimed();
     },
     enabled: !!actor && !isFetching,
   });
 }
 
 export function useAdminClaimGold() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (amount: bigint) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).adminClaimGold(amount);
+      await actor.adminClaimGold(amount);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["goldBalance"] });
@@ -859,7 +867,7 @@ export function useAdminClaimGold() {
 }
 
 export function useTransferGold() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -867,7 +875,7 @@ export function useTransferGold() {
       amount,
     }: { toUsername: string; amount: bigint }) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).transferGold(toUsername, amount);
+      await actor.transferGold(toUsername, amount);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["goldBalance"] });
@@ -877,12 +885,12 @@ export function useTransferGold() {
 }
 
 export function useRequestBuyGold() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (amount: bigint) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).requestBuyGold(amount);
+      await actor.requestBuyGold(amount);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["goldBalance"] });
@@ -892,12 +900,12 @@ export function useRequestBuyGold() {
 }
 
 export function useRequestSellGold() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (amount: bigint) => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).requestSellGold(amount);
+      await actor.requestSellGold(amount);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["goldBalance"] });
@@ -907,12 +915,12 @@ export function useRequestSellGold() {
 }
 
 export function useGetUsersWithGoldAbove(threshold: bigint) {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery({
     queryKey: ["goldDealers", threshold.toString()],
     queryFn: async () => {
       if (!actor) return [];
-      return (actor as any).getUsersWithGoldAbove(threshold);
+      return actor.getUsersWithGoldAbove(threshold);
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 30000,
@@ -920,12 +928,12 @@ export function useGetUsersWithGoldAbove(threshold: bigint) {
 }
 
 export function useGetMyNotifications() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery({
     queryKey: ["myNotifications"],
     queryFn: async () => {
       if (!actor) return [];
-      return extActor(actor).getMyNotifications();
+      return actor.getMyNotifications();
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 15000,
@@ -933,12 +941,12 @@ export function useGetMyNotifications() {
 }
 
 export function useMarkNotificationsRead() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
       if (!actor) throw new Error("Actor not available");
-      await extActor(actor).markNotificationsRead();
+      await actor.markNotificationsRead();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["myNotifications"] });
@@ -949,25 +957,25 @@ export function useMarkNotificationsRead() {
 // ─── Block / Unblock Hooks ────────────────────────────────────────────────────
 
 export function useGetMyBlockedUsers() {
-  const { actor, isFetching } = useActor();
+  const { actor, isFetching } = useActor(createActor);
   return useQuery<UserProfile[]>({
     queryKey: ["blockedUsers"],
     queryFn: async () => {
       if (!actor) return [];
-      return extActor(actor).getMyBlockedUsers();
+      return actor.getMyBlockedUsers();
     },
     enabled: !!actor && !isFetching,
   });
 }
 
 export function useBlockUser() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (targetUserId: string) => {
       if (!actor) throw new Error("Actor not available");
       const { Principal } = await import("@icp-sdk/core/principal");
-      await extActor(actor).blockUser(Principal.fromText(targetUserId));
+      await actor.blockUser(Principal.fromText(targetUserId));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
@@ -976,13 +984,13 @@ export function useBlockUser() {
 }
 
 export function useUnblockUser() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (targetUserId: string) => {
       if (!actor) throw new Error("Actor not available");
       const { Principal } = await import("@icp-sdk/core/principal");
-      await extActor(actor).unblockUser(Principal.fromText(targetUserId));
+      await actor.unblockUser(Principal.fromText(targetUserId));
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
@@ -993,12 +1001,12 @@ export function useUnblockUser() {
 // ─── Group Member Management Hooks ──────────────────────────────────────────
 
 export function useGetGroupCreators() {
-  const { actor, isFetching } = useActor();
-  return useQuery<Array<[ConversationId, string]>>({
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<Array<[ConversationId, UserId]>>({
     queryKey: ["groupCreators"],
     queryFn: async () => {
       if (!actor) return [];
-      return (actor as any).getGroupCreators();
+      return actor.getGroupCreators();
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 30000,
@@ -1006,7 +1014,7 @@ export function useGetGroupCreators() {
 }
 
 export function useAddGroupMember() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -1017,7 +1025,7 @@ export function useAddGroupMember() {
       username: string;
     }) => {
       if (!actor) throw new Error("Actor not available");
-      await (actor as any).addGroupMember(conversationId, username);
+      await actor.addGroupMember(conversationId, username);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -1026,7 +1034,7 @@ export function useAddGroupMember() {
 }
 
 export function useRemoveGroupMember() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -1038,7 +1046,7 @@ export function useRemoveGroupMember() {
     }) => {
       if (!actor) throw new Error("Actor not available");
       const { Principal } = await import("@icp-sdk/core/principal");
-      await (actor as any).removeGroupMember(
+      await actor.removeGroupMember(
         conversationId,
         Principal.fromText(memberId),
       );
@@ -1050,11 +1058,161 @@ export function useRemoveGroupMember() {
 }
 
 export function useSearchUsers() {
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   return useMutation({
     mutationFn: async (query: string) => {
       if (!actor) throw new Error("Actor not available");
-      return (actor as any).searchUsers(query);
+      return actor.searchUsers(query);
     },
+  });
+}
+
+// ─── Analytics Hooks (public platform + personal user stats) ─────────────────
+
+export function useGetTotalUsersCount() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["analytics", "totalUsers"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return actor.getTotalUsers();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetTotalMessagesSent() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["analytics", "messagesSent"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return actor.getTotalMessagesCount();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetTotalGoldVolume() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<number>({
+    queryKey: ["analytics", "goldVolume"],
+    queryFn: async () => {
+      if (!actor) return 0;
+      return actor.getTotalGoldVolume();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetActiveUsersCount() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["analytics", "activeUsers"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return actor.getActiveUsersCount();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetTotalChannelsCreated() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["analytics", "channelsCreated"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return actor.getTotalChannelsCreated();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetTotalStoriesPosts() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["analytics", "storiesPosts"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return actor.getTotalStoriesPosted();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+// ─── Personal User Analytics Hooks ───────────────────────────────────────────
+
+export function useGetUserMessageCount() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["analytics", "userMessageCount"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return (
+        actor as ReturnType<typeof createActor> & {
+          getUserMessageCount: () => Promise<bigint>;
+        }
+      ).getUserMessageCount();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetUserStoriesPosted() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["analytics", "userStoriesPosted"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return (
+        actor as ReturnType<typeof createActor> & {
+          getUserStoriesPosted: () => Promise<bigint>;
+        }
+      ).getUserStoriesPosted();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetUserChannelsCreated() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["analytics", "userChannelsCreated"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return (
+        actor as ReturnType<typeof createActor> & {
+          getUserChannelsCreated: () => Promise<bigint>;
+        }
+      ).getUserChannelsCreated();
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetStoryViewersList(statusId: StatusId | null) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<string[]>({
+    queryKey: ["storyViewersList", statusId?.toString()],
+    queryFn: async () => {
+      if (!actor || statusId === null) return [];
+      return (
+        actor as ReturnType<typeof createActor> & {
+          getStoryViewersList: (id: StatusId) => Promise<string[]>;
+        }
+      ).getStoryViewersList(statusId);
+    },
+    enabled: !!actor && !isFetching && statusId !== null,
+    staleTime: 15000,
   });
 }

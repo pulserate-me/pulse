@@ -9,11 +9,23 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Camera, Loader2 } from "lucide-react";
+import { Camera, ChevronDown, Loader2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useMediaUpload } from "../hooks/useMediaUpload";
 import { useCreateChannel } from "../hooks/useQueries";
+
+const CHANNEL_CATEGORIES = [
+  "Music",
+  "Finance",
+  "Sports",
+  "News",
+  "Entertainment",
+  "Technology",
+  "Health",
+  "Education",
+  "Other",
+] as const;
 
 interface CreateChannelModalProps {
   open: boolean;
@@ -28,6 +40,7 @@ export default function CreateChannelModal({
 }: CreateChannelModalProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState<string>("");
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [pendingAvatar, setPendingAvatar] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -40,6 +53,7 @@ export default function CreateChannelModal({
   const reset = () => {
     setName("");
     setDescription("");
+    setCategory("");
     setAvatarPreview(null);
     setPendingAvatar(null);
   };
@@ -66,6 +80,7 @@ export default function CreateChannelModal({
         name: name.trim(),
         description: description.trim(),
         avatarUrl,
+        category: category || undefined,
       });
       toast.success("Channel created!");
       reset();
@@ -175,6 +190,43 @@ export default function CreateChannelModal({
               maxLength={300}
               disabled={isBusy}
             />
+          </div>
+
+          {/* Category */}
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-sm text-muted-foreground">Category</Label>
+            <div className="relative">
+              <select
+                data-ocid="channel.create.category_select"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                disabled={isBusy}
+                className="w-full h-9 rounded-md px-3 pr-8 text-sm appearance-none cursor-pointer focus:outline-none focus:ring-1"
+                style={{
+                  background: "oklch(0.16 0.015 55)",
+                  border: "1px solid oklch(0.3 0.01 55)",
+                  color: category ? "oklch(0.9 0.01 55)" : "oklch(0.5 0.02 55)",
+                }}
+              >
+                <option value="">Select a category (optional)</option>
+                {CHANNEL_CATEGORIES.map((cat) => (
+                  <option
+                    key={cat}
+                    value={cat}
+                    style={{
+                      background: "oklch(0.16 0.015 55)",
+                      color: "oklch(0.9 0.01 55)",
+                    }}
+                  >
+                    {cat}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none"
+                style={{ color: "oklch(0.5 0.02 55)" }}
+              />
+            </div>
           </div>
         </div>
 

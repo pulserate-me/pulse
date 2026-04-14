@@ -1,11 +1,11 @@
 import { Toaster } from "@/components/ui/sonner";
+import { useInternetIdentity } from "@caffeineai/core-infrastructure";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import AuthScreen from "./components/AuthScreen";
 import MainLayout from "./components/MainLayout";
 import PWAInstallBanner from "./components/PWAInstallBanner";
 import ProfileSetupModal from "./components/ProfileSetupModal";
-import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import { useGetCallerUserProfile } from "./hooks/useQueries";
 
 export default function App() {

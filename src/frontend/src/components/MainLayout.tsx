@@ -1,12 +1,14 @@
+import { useInternetIdentity } from "@caffeineai/core-infrastructure";
 import { Principal } from "@icp-sdk/core/principal";
 import { useQueryClient } from "@tanstack/react-query";
 import { Loader2, MessageCircle, Radio } from "lucide-react";
 import { Suspense, lazy, useEffect, useState } from "react";
 import type { ConversationId } from "../backend";
-import { useInternetIdentity } from "../hooks/useInternetIdentity";
+import { useBackgroundNotifications } from "../hooks/usePushNotifications";
 import {
   useCreateDirectConversation,
   useGetCallerUserProfile,
+  useGetMyNotifications,
   useSearchUserByUsername,
   useUpdateLastSeen,
 } from "../hooks/useQueries";
@@ -44,6 +46,12 @@ export default function MainLayout({
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   const currentUserId = identity?.getPrincipal().toString() ?? "";
+
+  // Fetch notifications for background push
+  const { data: notifications = [] } = useGetMyNotifications();
+
+  // Show native push notifications when the page is backgrounded
+  useBackgroundNotifications(notifications);
 
   useEffect(() => {
     updateLastSeen();
@@ -210,6 +218,10 @@ export default function MainLayout({
         open={profileModalOpen}
         onOpenChange={setProfileModalOpen}
         onStartChat={handleStartChatFromProfile}
+        onSelectChannel={(id) => {
+          setProfileModalOpen(false);
+          handleSelectChannel(id);
+        }}
       />
     </div>
   );

@@ -1,0 +1,281 @@
+// Version: 1.0.0
+type AppNotification__929414022 =
+  {
+    id : NotificationId__65415016;
+    kind : NotificationKind__672845358;
+    read : Bool;
+    timestamp : Timestamp__672038077
+  };
+type ChannelCommentId__565037940 = Nat;
+type ChannelComment__956679622 =
+  {
+    author : UserId__313180070;
+    id : ChannelCommentId__565037940;
+    postId : ChannelPostId__748044666;
+    text : Text;
+    timestamp : Timestamp__672038077
+  };
+type ChannelId__279479923 = Nat;
+type ChannelPostContent__167333017 =
+  {mediaType : ?MediaType__597750801; mediaUrl : ?Text; text : Text};
+type ChannelPostId__748044666 = Nat;
+type ChannelPost__228312511 =
+  {
+    author : UserId__313180070;
+    channelId : ChannelId__279479923;
+    content : ChannelPostContent__167333017;
+    id : ChannelPostId__748044666;
+    timestamp : Timestamp__672038077
+  };
+type Channel__349342183 =
+  {
+    avatarUrl : ?Text;
+    category : ?Text;
+    createdAt : Timestamp__672038077;
+    description : Text;
+    id : ChannelId__279479923;
+    name : Text;
+    owner : UserId__313180070
+  };
+type CommentId__265911312 = Nat;
+type ConversationId__59272760 = Nat;
+type ConversationType__826145274 = {#direct; #group : Text};
+type Conversation__183739819 =
+  {
+    id : ConversationId__59272760;
+    lastMessageTimestamp : Int;
+    members : [UserId__313180070];
+    messages : [Message__19119041];
+    type_ : ConversationType__826145274
+  };
+type Data__159895909<T> = {var count : Nat__490723111; elements : [var ?T]};
+type Data__791452850<K, V> =
+  {var count : Nat__490723111; kvs : [var ?(K, V)]};
+type GoldTransaction__15439012 =
+  {
+    amount : Nat;
+    counterpartyUsername : ?Text;
+    id : GoldTxId__1031497868;
+    timestamp : Timestamp__672038077;
+    txType : GoldTxType__296149734
+  };
+type GoldTxId__1031497868 = Nat;
+type GoldTxType__296149734 =
+  {#buyRequest; #claimed; #received; #sellRequest; #sent};
+type Internal__667636161<T> =
+  {children : [var ?Node__92254746<T>]; data : Data__159895909<T>};
+type Internal__8484328<K, V> =
+  {children : [var ?Node__46230540<K, V>]; data : Data__791452850<K, V>};
+type Leaf__520550824<T> = {data : Data__159895909<T>};
+type Leaf__809889148<K, V> = {data : Data__791452850<K, V>};
+type List__415060402<T> = List__790383201<T>;
+type List__790383201<T> =
+  {
+    var blockIndex : Nat__490723111;
+    var blocks : [var [var ?T]];
+    var elementIndex : Nat__490723111
+  };
+type Map__158565046<K, V> = Map__297112838<K, V>;
+type Map__297112838<K, V> =
+  {var root : Node__46230540<K, V>; var size : Nat__490723111};
+type Map__605269027<K, V> = Map__158565046<K, V>;
+type MediaType__597750801 =
+  {#audio; #document; #image; #other : Text; #video};
+type MessageContent__660041587 =
+  {mediaType : ?MediaType__597750801; mediaUrl : ?Text; text : Text};
+type MessageId__147617357 = Nat;
+type MessageReadReceipt__739301315 =
+  {timestamp : Timestamp__672038077; userId : UserId__313180070};
+type Message__19119041 =
+  {
+    content : MessageContent__660041587;
+    id : MessageId__147617357;
+    reactions : [UserId__313180070];
+    readReceipts : [MessageReadReceipt__739301315];
+    replyTo : ?ReplyToInfo__196695869;
+    sender : UserId__313180070;
+    timestamp : Timestamp__672038077
+  };
+type Nat__490723111 = Nat__920180692;
+type Nat__920180692 = Nat;
+type Node__46230540<K, V> =
+  {#internal : Internal__8484328<K, V>; #leaf : Leaf__809889148<K, V>};
+type Node__92254746<T> =
+  {#internal : Internal__667636161<T>; #leaf : Leaf__520550824<T>};
+type NotificationId__65415016 = Nat;
+type NotificationKind__672845358 =
+  {
+    #channelFollowed : {byUsername : Text; channelId : Nat};
+    #channelPostCommented :
+      {byUsername : Text; channelId : Nat; postId : Nat};
+    #channelPostLiked : {byUsername : Text; channelId : Nat; postId : Nat};
+    #goldGifted : {amount : Nat; fromUsername : Text};
+    #storyCommented : {byUsername : Text; statusId : Nat};
+    #storyLiked : {byUsername : Text; statusId : Nat}
+  };
+type ReplyToInfo__196695869 =
+  {messageId : MessageId__147617357; preview : Text; senderUsername : Text};
+type Set__532252804<T> = Set__710576254<T>;
+type Set__710576254<T> =
+  {var root : Node__92254746<T>; var size : Nat__490723111};
+type StatusComment__217202031 =
+  {
+    author : UserId__313180070;
+    id : CommentId__265911312;
+    statusId : StatusId__33433321;
+    text : Text;
+    timestamp : Timestamp__672038077
+  };
+type StatusContent__121988712 =
+  {mediaType : ?MediaType__597750801; mediaUrl : ?Text; text : Text};
+type StatusId__33433321 = Nat;
+type Status__1000080315 =
+  {
+    author : UserId__313180070;
+    content : StatusContent__121988712;
+    id : StatusId__33433321;
+    timestamp : Timestamp__672038077
+  };
+type Timestamp__672038077 = Int;
+type UserId__313180070 = Principal;
+type UserProfile__491224006 =
+  {
+    avatarUrl : ?Text;
+    bio : ?Text;
+    displayName : Text;
+    lastSeen : Timestamp__672038077;
+    username : Text
+  };
+type UserRole__1054455867 = {#admin; #guest; #user};
+actor {
+  stable accessControlState :
+    {
+      var adminAssigned : Bool;
+      userRoles : Map__605269027<Principal, UserRole__1054455867>
+    };
+  stable var adminTotalClaimed : Nat;
+  stable adminUsername : Text;
+  stable blockedUsers :
+    {
+      var root :
+        Node__46230540<UserId__313180070, Set__532252804<UserId__313180070>>;
+      var size : Nat__490723111
+    };
+  stable channelComments :
+    {
+      var root :
+        Node__46230540<ChannelCommentId__565037940, ChannelComment__956679622>;
+      var size : Nat__490723111
+    };
+  stable channelFollowers :
+    {
+      var root :
+        Node__46230540<ChannelId__279479923,
+                        Set__532252804<UserId__313180070>>;
+      var size : Nat__490723111
+    };
+  stable channelPostLikes :
+    {
+      var root :
+        Node__46230540<ChannelPostId__748044666,
+                        Set__532252804<UserId__313180070>>;
+      var size : Nat__490723111
+    };
+  stable channelPosts :
+    {
+      var root :
+        Node__46230540<ChannelPostId__748044666, ChannelPost__228312511>;
+      var size : Nat__490723111
+    };
+  stable channels :
+    {
+      var root : Node__46230540<ChannelId__279479923, Channel__349342183>;
+      var size : Nat__490723111
+    };
+  stable conversations :
+    {
+      var root :
+        Node__46230540<ConversationId__59272760, Conversation__183739819>;
+      var size : Nat__490723111
+    };
+  stable goldBalances :
+    {
+      var root : Node__46230540<UserId__313180070, Nat>;
+      var size : Nat__490723111
+    };
+  stable goldMaxClaim : Nat;
+  stable goldTransactions :
+    {
+      var root :
+        Node__46230540<UserId__313180070,
+                        List__415060402<GoldTransaction__15439012>>;
+      var size : Nat__490723111
+    };
+  stable groupAvatars :
+    {
+      var root : Node__46230540<ConversationId__59272760, Text>;
+      var size : Nat__490723111
+    };
+  stable groupCreators :
+    {
+      var root : Node__46230540<ConversationId__59272760, UserId__313180070>;
+      var size : Nat__490723111
+    };
+  stable highlights :
+    {
+      var root :
+        Node__46230540<UserId__313180070, List__415060402<StatusId__33433321>>;
+      var size : Nat__490723111
+    };
+  stable messageReactions :
+    {
+      var root :
+        Node__46230540<MessageId__147617357,
+                        Set__532252804<UserId__313180070>>;
+      var size : Nat__490723111
+    };
+  stable var nextChannelCommentId : Nat;
+  stable var nextChannelId : Nat;
+  stable var nextChannelPostId : Nat;
+  stable var nextCommentId : Nat;
+  stable var nextConversationId : Nat;
+  stable var nextGoldTxId : Nat;
+  stable var nextMessageId : Nat;
+  stable var nextNotificationId : Nat;
+  stable var nextStatusId : Nat;
+  stable notifications :
+    {
+      var root :
+        Node__46230540<UserId__313180070,
+                        List__415060402<AppNotification__929414022>>;
+      var size : Nat__490723111
+    };
+  stable statusComments :
+    {
+      var root :
+        Node__46230540<CommentId__265911312, StatusComment__217202031>;
+      var size : Nat__490723111
+    };
+  stable statusLikes :
+    {
+      var root :
+        Node__46230540<StatusId__33433321, Set__532252804<UserId__313180070>>;
+      var size : Nat__490723111
+    };
+  stable statuses :
+    {
+      var root : Node__46230540<StatusId__33433321, Status__1000080315>;
+      var size : Nat__490723111
+    };
+  stable storyViews :
+    {
+      var root :
+        Node__46230540<StatusId__33433321, Set__532252804<UserId__313180070>>;
+      var size : Nat__490723111
+    };
+  stable users :
+    {
+      var root : Node__46230540<UserId__313180070, UserProfile__491224006>;
+      var size : Nat__490723111
+    }
+};

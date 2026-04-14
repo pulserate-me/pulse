@@ -10,7 +10,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useActor } from "@caffeineai/core-infrastructure";
 import {
+  BarChart2,
   LogOut,
   MessageCircle,
   MoreVertical,
@@ -24,11 +26,20 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Conversation, ConversationId, UserProfile } from "../backend";
-import { useActor } from "../hooks/useActor";
+import { createActor } from "../backend";
 import {
   useCreateDirectConversation,
+  useGetActiveUsersCount,
   useGetGroupAvatars,
+  useGetTotalChannelsCreated,
+  useGetTotalGoldVolume,
+  useGetTotalMessagesSent,
+  useGetTotalStoriesPosts,
+  useGetTotalUsersCount,
+  useGetUserChannelsCreated,
+  useGetUserMessageCount,
   useGetUserProfile,
+  useGetUserStoriesPosted,
   useListUserConversations,
   useSearchUserByUsername,
   useSearchUsers,
@@ -284,6 +295,226 @@ function ConversationSections({
   );
 }
 
+// Analytics Dashboard — visible to all users
+function AnalyticsDashboard({
+  onClose,
+  currentProfile,
+}: {
+  onClose: () => void;
+  currentProfile: UserProfile | null;
+}) {
+  const isAuthenticated = !!currentProfile;
+
+  // Platform stats
+  const { data: totalUsers } = useGetTotalUsersCount();
+  const { data: messagesSent } = useGetTotalMessagesSent();
+  const { data: goldVolume } = useGetTotalGoldVolume();
+  const { data: activeUsers } = useGetActiveUsersCount();
+  const { data: channelsCreated } = useGetTotalChannelsCreated();
+  const { data: storiesPosts } = useGetTotalStoriesPosts();
+
+  // Personal stats (authenticated only)
+  const { data: userMessages } = useGetUserMessageCount();
+  const { data: userStories } = useGetUserStoriesPosted();
+  const { data: userChannels } = useGetUserChannelsCreated();
+
+  const platformMetrics = [
+    {
+      label: "Total Users",
+      value:
+        totalUsers !== undefined ? Number(totalUsers).toLocaleString() : "—",
+      icon: "👥",
+    },
+    {
+      label: "Messages Sent",
+      value:
+        messagesSent !== undefined
+          ? Number(messagesSent).toLocaleString()
+          : "—",
+      icon: "💬",
+    },
+    {
+      label: "Gold Volume",
+      value:
+        goldVolume !== undefined ? `✦ ${Number(goldVolume).toFixed(2)}` : "—",
+      icon: "✦",
+    },
+    {
+      label: "Active Users (7d)",
+      value:
+        activeUsers !== undefined ? Number(activeUsers).toLocaleString() : "—",
+      icon: "🟢",
+    },
+    {
+      label: "Channels Created",
+      value:
+        channelsCreated !== undefined
+          ? Number(channelsCreated).toLocaleString()
+          : "—",
+      icon: "📻",
+    },
+    {
+      label: "Stories Posted",
+      value:
+        storiesPosts !== undefined
+          ? Number(storiesPosts).toLocaleString()
+          : "—",
+      icon: "📖",
+    },
+  ];
+
+  const personalMetrics = [
+    {
+      label: "Your Messages",
+      value:
+        userMessages !== undefined
+          ? Number(userMessages).toLocaleString()
+          : "—",
+      icon: "✉️",
+    },
+    {
+      label: "Your Stories",
+      value:
+        userStories !== undefined ? Number(userStories).toLocaleString() : "—",
+      icon: "🌟",
+    },
+    {
+      label: "Your Channels",
+      value:
+        userChannels !== undefined
+          ? Number(userChannels).toLocaleString()
+          : "—",
+      icon: "📡",
+    },
+  ];
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0"
+        style={{ background: "oklch(0.13 0.02 55)" }}
+      >
+        <div className="flex items-center gap-2">
+          <BarChart2
+            className="h-4 w-4"
+            style={{ color: "oklch(0.82 0.15 72)" }}
+          />
+          <span
+            className="font-semibold text-sm"
+            style={{ color: "oklch(0.82 0.15 72)" }}
+          >
+            Analytics
+          </span>
+        </div>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={onClose}
+          className="h-8 w-8 rounded-xl hover:bg-muted"
+          aria-label="Close analytics"
+          data-ocid="analytics.close_button"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Scrollable metrics area */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin p-4 flex flex-col gap-5">
+        {/* Platform Stats section */}
+        <div>
+          <p
+            className="text-[10px] uppercase tracking-widest font-semibold mb-2.5"
+            style={{ color: "oklch(0.82 0.15 72 / 0.7)" }}
+          >
+            Platform Stats
+          </p>
+          <div className="grid grid-cols-2 gap-2.5">
+            {platformMetrics.map((metric) => (
+              <div
+                key={metric.label}
+                data-ocid={`analytics.platform.${metric.label.toLowerCase().replace(/\s+/g, "_")}`}
+                className="flex flex-col gap-1.5 rounded-xl p-3"
+                style={{
+                  background: "oklch(0.16 0.03 55)",
+                  border: "1px solid oklch(0.82 0.15 72 / 0.12)",
+                }}
+              >
+                <span className="text-base leading-none">{metric.icon}</span>
+                <span
+                  className="text-lg font-bold font-display leading-tight"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                >
+                  {metric.value}
+                </span>
+                <span className="text-xs text-muted-foreground leading-tight">
+                  {metric.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div
+          className="h-px w-full"
+          style={{ background: "oklch(0.82 0.15 72 / 0.1)" }}
+        />
+
+        {/* Your Activity section */}
+        <div>
+          <p
+            className="text-[10px] uppercase tracking-widest font-semibold mb-2.5"
+            style={{ color: "oklch(0.82 0.15 72 / 0.7)" }}
+          >
+            Your Activity
+          </p>
+          {!isAuthenticated ? (
+            <div
+              className="rounded-xl p-4 text-center text-xs text-muted-foreground"
+              style={{
+                background: "oklch(0.16 0.03 55)",
+                border: "1px solid oklch(0.82 0.15 72 / 0.08)",
+              }}
+            >
+              Log in to see your stats
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2.5">
+              {personalMetrics.map((metric) => (
+                <div
+                  key={metric.label}
+                  data-ocid={`analytics.personal.${metric.label.toLowerCase().replace(/\s+/g, "_")}`}
+                  className="flex flex-col gap-1.5 rounded-xl p-3"
+                  style={{
+                    background: "oklch(0.16 0.03 55)",
+                    border: "1px solid oklch(0.82 0.15 72 / 0.12)",
+                  }}
+                >
+                  <span className="text-base leading-none">{metric.icon}</span>
+                  <span
+                    className="text-lg font-bold font-display leading-tight"
+                    style={{ color: "oklch(0.82 0.15 72)" }}
+                  >
+                    {metric.value}
+                  </span>
+                  <span className="text-xs text-muted-foreground leading-tight">
+                    {metric.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <p className="text-[10px] text-muted-foreground/50 text-center">
+          Refreshes every 30 seconds
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // QR Scanner Modal
 function QRScannerModal({
   open,
@@ -410,6 +641,8 @@ function QRScannerModal({
   );
 }
 
+// ─── Language Selector removed ───────────────────────────────────────────────
+
 interface SidebarProps {
   currentUserId: string;
   currentProfile: UserProfile | null;
@@ -454,6 +687,7 @@ export default function Sidebar({
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [showAllDMs, setShowAllDMs] = useState(false);
   const [showAllGroups, setShowAllGroups] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [channelCreatorUserId, setChannelCreatorUserId] = useState<
     string | null
   >(null);
@@ -464,7 +698,7 @@ export default function Sidebar({
   const { mutateAsync: searchUsers } = useSearchUsers();
   const { mutateAsync: createDirectConversation } =
     useCreateDirectConversation();
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
 
   const groupAvatarMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -690,6 +924,20 @@ export default function Sidebar({
               </>
             )}
             <NotificationBell />
+            <Button
+              data-ocid="sidebar.analytics_button"
+              size="icon"
+              variant="ghost"
+              onClick={() => setAnalyticsOpen((v) => !v)}
+              className="h-9 w-9 rounded-xl hover:bg-muted"
+              aria-label="Analytics dashboard"
+              title="Analytics"
+              style={
+                analyticsOpen ? { color: "oklch(0.82 0.15 72)" } : undefined
+              }
+            >
+              <BarChart2 className="h-4 w-4" />
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -720,23 +968,31 @@ export default function Sidebar({
         {/* Profile chip */}
         {currentProfile && (
           <div className="flex items-center gap-2 mb-3">
-            <Avatar className="w-7 h-7">
-              {currentProfile.avatarUrl && (
-                <AvatarImage
-                  src={currentProfile.avatarUrl}
-                  alt={currentProfile.displayName}
-                />
-              )}
-              <AvatarFallback
-                className="text-xs font-semibold"
-                style={{
-                  background: "oklch(0.76 0.13 72 / 0.2)",
-                  color: "oklch(0.82 0.15 72)",
-                }}
-              >
-                {getInitials(currentProfile.displayName)}
-              </AvatarFallback>
-            </Avatar>
+            <button
+              type="button"
+              data-ocid="sidebar.own_avatar_button"
+              aria-label="View my profile"
+              onClick={() => onViewProfile(currentProfile.username)}
+              className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            >
+              <Avatar className="w-7 h-7">
+                {currentProfile.avatarUrl && (
+                  <AvatarImage
+                    src={currentProfile.avatarUrl}
+                    alt={currentProfile.displayName}
+                  />
+                )}
+                <AvatarFallback
+                  className="text-xs font-semibold"
+                  style={{
+                    background: "oklch(0.76 0.13 72 / 0.2)",
+                    color: "oklch(0.82 0.15 72)",
+                  }}
+                >
+                  {getInitials(currentProfile.displayName)}
+                </AvatarFallback>
+              </Avatar>
+            </button>
             <span className="text-sm text-muted-foreground flex-1 truncate">
               {currentProfile.displayName}
             </span>
@@ -964,7 +1220,14 @@ export default function Sidebar({
       )}
 
       {/* Content area */}
-      {!universalSearchActive && activeTab === "status" ? (
+      {analyticsOpen ? (
+        <div className="flex-1 overflow-hidden">
+          <AnalyticsDashboard
+            onClose={() => setAnalyticsOpen(false)}
+            currentProfile={currentProfile}
+          />
+        </div>
+      ) : !universalSearchActive && activeTab === "status" ? (
         <StatusView
           currentUserId={currentUserId}
           currentProfile={currentProfile}
@@ -1054,6 +1317,11 @@ export default function Sidebar({
         open={channelCreatorOpen}
         onOpenChange={setChannelCreatorOpen}
         onStartChat={handleStartChatFromChannelProfile}
+        onSelectChannel={(id) => {
+          setChannelCreatorOpen(false);
+          setActiveTab("channels");
+          onSelectChannel(id);
+        }}
       />
     </div>
   );

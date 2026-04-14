@@ -23,6 +23,7 @@ export interface Channel {
   'createdAt' : Timestamp,
   'description' : string,
   'avatarUrl' : [] | [string],
+  'category' : [] | [string],
 }
 export type ChannelCommentId = bigint;
 export interface ChannelCommentWithProfile {
@@ -96,6 +97,8 @@ export interface Message {
   'readReceipts' : Array<MessageReadReceipt>,
   'sender' : UserId,
   'timestamp' : Timestamp,
+  'replyTo' : [] | [ReplyToInfo],
+  'reactions' : Array<UserId>,
 }
 export interface MessageContent {
   'text' : string,
@@ -103,7 +106,10 @@ export interface MessageContent {
   'mediaType' : [] | [MediaType],
 }
 export type MessageId = bigint;
-export interface MessageInput { 'content' : MessageContent }
+export interface MessageInput {
+  'content' : MessageContent,
+  'replyToMessageId' : [] | [MessageId],
+}
 export interface MessageReadReceipt {
   'userId' : UserId,
   'timestamp' : Timestamp,
@@ -129,6 +135,11 @@ export type NotificationKind = {
   { 'storyCommented' : { 'byUsername' : string, 'statusId' : bigint } } |
   { 'storyLiked' : { 'byUsername' : string, 'statusId' : bigint } } |
   { 'channelFollowed' : { 'channelId' : bigint, 'byUsername' : string } };
+export interface ReplyToInfo {
+  'messageId' : MessageId,
+  'preview' : string,
+  'senderUsername' : string,
+}
 export interface Status {
   'id' : StatusId,
   'content' : StatusContent,
@@ -149,6 +160,7 @@ export interface StatusContent {
 export type StatusId = bigint;
 export interface StatusInteractions {
   'likeCount' : bigint,
+  'viewCount' : bigint,
   'comments' : Array<StatusCommentWithProfile>,
   'likedByMe' : boolean,
 }
@@ -164,39 +176,43 @@ export interface UserProfile {
 export type UserRole = { 'admin' : null } |
   { 'user' : null } |
   { 'guest' : null };
-export interface _CaffeineStorageCreateCertificateResult {
+export interface _ImmutableObjectStorageCreateCertificateResult {
   'method' : string,
   'blob_hash' : string,
 }
-export interface _CaffeineStorageRefillInformation {
+export interface _ImmutableObjectStorageRefillInformation {
   'proposed_top_up_amount' : [] | [bigint],
 }
-export interface _CaffeineStorageRefillResult {
+export interface _ImmutableObjectStorageRefillResult {
   'success' : [] | [boolean],
   'topped_up_amount' : [] | [bigint],
 }
 export interface _SERVICE {
-  '_caffeineStorageBlobIsLive' : ActorMethod<[Uint8Array], boolean>,
-  '_caffeineStorageBlobsToDelete' : ActorMethod<[], Array<Uint8Array>>,
-  '_caffeineStorageConfirmBlobDeletion' : ActorMethod<
+  '_immutableObjectStorageBlobsAreLive' : ActorMethod<
+    [Array<Uint8Array>],
+    Array<boolean>
+  >,
+  '_immutableObjectStorageBlobsToDelete' : ActorMethod<[], Array<Uint8Array>>,
+  '_immutableObjectStorageConfirmBlobDeletion' : ActorMethod<
     [Array<Uint8Array>],
     undefined
   >,
-  '_caffeineStorageCreateCertificate' : ActorMethod<
+  '_immutableObjectStorageCreateCertificate' : ActorMethod<
     [string],
-    _CaffeineStorageCreateCertificateResult
+    _ImmutableObjectStorageCreateCertificateResult
   >,
-  '_caffeineStorageRefillCashier' : ActorMethod<
-    [[] | [_CaffeineStorageRefillInformation]],
-    _CaffeineStorageRefillResult
+  '_immutableObjectStorageRefillCashier' : ActorMethod<
+    [[] | [_ImmutableObjectStorageRefillInformation]],
+    _ImmutableObjectStorageRefillResult
   >,
-  '_caffeineStorageUpdateGatewayPrincipals' : ActorMethod<[], undefined>,
-  '_initializeAccessControlWithSecret' : ActorMethod<[string], undefined>,
+  '_immutableObjectStorageUpdateGatewayPrincipals' : ActorMethod<[], undefined>,
+  '_initializeAccessControl' : ActorMethod<[], undefined>,
   'addChannelPost' : ActorMethod<
     [ChannelId, ChannelPostContent],
     ChannelPostId
   >,
   'addGroupMember' : ActorMethod<[ConversationId, string], undefined>,
+  'addMessageReaction' : ActorMethod<[ConversationId, MessageId], undefined>,
   'addStatus' : ActorMethod<[StatusContent], StatusId>,
   'adminClaimGold' : ActorMethod<[bigint], undefined>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
@@ -206,7 +222,10 @@ export interface _SERVICE {
     ChannelCommentId
   >,
   'commentOnStatus' : ActorMethod<[StatusId, string], CommentId>,
-  'createChannel' : ActorMethod<[string, string, [] | [string]], ChannelId>,
+  'createChannel' : ActorMethod<
+    [string, string, [] | [string], [] | [string]],
+    ChannelId
+  >,
   'createDirectConversation' : ActorMethod<[UserId], ConversationId>,
   'createGroupConversation' : ActorMethod<
     [string, Array<UserId>, [] | [string]],
@@ -215,6 +234,7 @@ export interface _SERVICE {
   'deleteChannel' : ActorMethod<[ChannelId], undefined>,
   'deleteChannelPost' : ActorMethod<[ChannelPostId], undefined>,
   'deleteGroupName' : ActorMethod<[ConversationId], undefined>,
+  'deleteHighlight' : ActorMethod<[StatusId], undefined>,
   'deleteMessage' : ActorMethod<[ConversationId, MessageId], undefined>,
   'editChannelPost' : ActorMethod<
     [ChannelPostId, ChannelPostContent],
@@ -226,6 +246,7 @@ export interface _SERVICE {
     [ChannelPostId, ConversationId],
     MessageId
   >,
+  'getActiveUsersCount' : ActorMethod<[], bigint>,
   'getAdminTotalClaimed' : ActorMethod<[], bigint>,
   'getAllChannels' : ActorMethod<[], Array<ChannelWithMeta>>,
   'getAllStories' : ActorMethod<[], Array<[UserProfile, Array<Status>]>>,
@@ -237,10 +258,16 @@ export interface _SERVICE {
     ChannelPostInteractions
   >,
   'getChannelPosts' : ActorMethod<[ChannelId], Array<ChannelPost>>,
+  'getChannelsByCategory' : ActorMethod<[string], Array<ChannelWithMeta>>,
   'getContactStatuses' : ActorMethod<[], Array<[UserProfile, Array<Status>]>>,
   'getConversation' : ActorMethod<[ConversationId], [] | [Conversation]>,
   'getGroupAvatars' : ActorMethod<[], Array<[ConversationId, string]>>,
   'getGroupCreators' : ActorMethod<[], Array<[ConversationId, UserId]>>,
+  'getHighlights' : ActorMethod<[UserId], Array<Status>>,
+  'getMessageReactions' : ActorMethod<
+    [ConversationId, MessageId],
+    Array<UserId>
+  >,
   'getMessageReadReceipts' : ActorMethod<
     [ConversationId, MessageId],
     [] | [Array<MessageReadReceipt>]
@@ -258,12 +285,23 @@ export interface _SERVICE {
     Array<Message>
   >,
   'getStatusInteractions' : ActorMethod<[StatusId], StatusInteractions>,
+  'getStoryViewers' : ActorMethod<[StatusId], Array<string>>,
+  'getStoryViewersList' : ActorMethod<[StatusId], Array<string>>,
+  'getTotalChannelsCreated' : ActorMethod<[], bigint>,
+  'getTotalGoldVolume' : ActorMethod<[], number>,
+  'getTotalMessagesCount' : ActorMethod<[], bigint>,
+  'getTotalStoriesPosted' : ActorMethod<[], bigint>,
+  'getTotalUsers' : ActorMethod<[], bigint>,
   'getUnreadCount' : ActorMethod<[ConversationId], bigint>,
   'getUserByPrincipal' : ActorMethod<[UserId], [] | [UserProfile]>,
+  'getUserChannelsCreated' : ActorMethod<[], bigint>,
+  'getUserMessageCount' : ActorMethod<[], bigint>,
   'getUserProfile' : ActorMethod<[UserId], [] | [UserProfile]>,
+  'getUserStoriesPosted' : ActorMethod<[], bigint>,
   'getUsersWithGoldAbove' : ActorMethod<[bigint], Array<DealerInfo>>,
   'isBlockedBy' : ActorMethod<[UserId], boolean>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
+  'isHighlighted' : ActorMethod<[StatusId], boolean>,
   'isUserOnline' : ActorMethod<[UserId], boolean>,
   'leaveConversation' : ActorMethod<[ConversationId], undefined>,
   'likeChannelPost' : ActorMethod<[ChannelPostId], undefined>,
@@ -272,10 +310,22 @@ export interface _SERVICE {
   'markAsRead' : ActorMethod<[ConversationId], undefined>,
   'markMessagesAsRead' : ActorMethod<[ConversationId], undefined>,
   'markNotificationsRead' : ActorMethod<[], undefined>,
+  'recordStoryView' : ActorMethod<[StatusId], undefined>,
+  'removeFromHighlights' : ActorMethod<
+    [StatusId],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'removeGroupMember' : ActorMethod<[ConversationId, UserId], undefined>,
+  'removeMessageReaction' : ActorMethod<[ConversationId, MessageId], undefined>,
   'requestBuyGold' : ActorMethod<[bigint], undefined>,
   'requestSellGold' : ActorMethod<[bigint], undefined>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'saveToHighlights' : ActorMethod<
+    [StatusId],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'searchUserByUsername' : ActorMethod<
     [string],
     [] | [{ 'userId' : UserId, 'profile' : UserProfile }]
@@ -294,7 +344,7 @@ export interface _SERVICE {
   'updateCallerBio' : ActorMethod<[string], undefined>,
   'updateCallerDisplayName' : ActorMethod<[string], undefined>,
   'updateChannel' : ActorMethod<
-    [ChannelId, string, string, [] | [string]],
+    [ChannelId, string, string, [] | [string], [] | [string]],
     undefined
   >,
   'updateGroupAvatar' : ActorMethod<[ConversationId, string], undefined>,

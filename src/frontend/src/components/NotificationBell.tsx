@@ -70,16 +70,22 @@ function getNotificationMessage(kind: AppNotification["kind"]): {
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(6);
   const { data: notifications = [] } = useGetMyNotifications();
   const markRead = useMarkNotificationsRead();
 
   const unreadCount = notifications.filter((n) => !n.read).length;
-  const recent = notifications.slice(0, 20);
+  const sorted = [...notifications].reverse();
+  const visible = sorted.slice(0, visibleCount);
+  const hasMore = sorted.length > visibleCount;
 
   function handleOpen(isOpen: boolean) {
     setOpen(isOpen);
-    if (isOpen && unreadCount > 0) {
-      markRead.mutate();
+    if (isOpen) {
+      setVisibleCount(6); // reset pagination on open
+      if (unreadCount > 0) {
+        markRead.mutate();
+      }
     }
   }
 
@@ -130,7 +136,7 @@ export default function NotificationBell() {
           </h3>
         </div>
         <ScrollArea className="max-h-80">
-          {recent.length === 0 ? (
+          {visible.length === 0 ? (
             <div
               data-ocid="notification.empty_state"
               className="flex flex-col items-center justify-center py-10 px-4 gap-2"
@@ -145,7 +151,7 @@ export default function NotificationBell() {
             </div>
           ) : (
             <div className="py-1">
-              {recent.map((notif, i) => {
+              {visible.map((notif, i) => {
                 const { icon, message } = getNotificationMessage(notif.kind);
                 return (
                   <div
@@ -177,6 +183,17 @@ export default function NotificationBell() {
                   </div>
                 );
               })}
+              {hasMore && (
+                <button
+                  type="button"
+                  data-ocid="notification.view_more"
+                  onClick={() => setVisibleCount((c) => c + 6)}
+                  className="w-full py-2.5 text-xs font-semibold text-center transition-colors hover:bg-muted/30"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                >
+                  View more
+                </button>
+              )}
             </div>
           )}
         </ScrollArea>

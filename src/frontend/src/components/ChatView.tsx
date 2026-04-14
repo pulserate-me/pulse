@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useActor } from "@caffeineai/core-infrastructure";
 import {
   ArrowLeft,
   Camera,
@@ -40,6 +41,7 @@ import {
   MoreVertical,
   Paperclip,
   Pencil,
+  Reply,
   Send,
   Share2,
   Shield,
@@ -59,8 +61,9 @@ import type {
   ConversationId,
   MediaType,
   Message,
+  MessageId,
 } from "../backend";
-import { useActor } from "../hooks/useActor";
+import { createActor } from "../backend";
 import { useMediaUpload } from "../hooks/useMediaUpload";
 import {
   useAddGroupMember,
@@ -181,7 +184,7 @@ function MediaMessage({ url, mediaType, onImageClick }: MediaMessageProps) {
         className="max-w-[240px] max-h-[240px] rounded-lg mt-1"
         style={{ display: "block" }}
       >
-        <source src={url} type="video/mp4" />
+        <source src={url} />
       </video>
     );
   }
@@ -213,9 +216,9 @@ function ForwardMessagePicker({
   currentUserId,
   onSelect,
 }: {
-  conversations: any[];
+  conversations: Conversation[];
   currentUserId: string;
-  onSelect: (convId: any) => void;
+  onSelect: (convId: ConversationId) => void;
 }) {
   return (
     <ScrollArea className="max-h-72">
@@ -226,7 +229,9 @@ function ForwardMessagePicker({
       ) : (
         conversations.map((conv) => {
           const isGroupConv = conv.type.__kind__ === "group";
-          const convName = isGroupConv ? (conv.type as any).group : null;
+          const convName = isGroupConv
+            ? (conv.type as { __kind__: "group"; group: string }).group
+            : null;
           return (
             <ForwardConvRow
               key={conv.id.toString()}
@@ -250,7 +255,7 @@ function ForwardConvRow({
   isGroupConv,
   onSelect,
 }: {
-  conversation: any;
+  conversation: Conversation;
   convName: string | null;
   currentUserId: string;
   isGroupConv: boolean;
@@ -259,7 +264,7 @@ function ForwardConvRow({
   const otherUserId = isGroupConv
     ? null
     : (conversation.members
-        .find((m: any) => m.toString() !== currentUserId)
+        .find((m) => m.toString() !== currentUserId)
         ?.toString() ?? null);
   const { data: otherProfile } = useGetUserProfile(otherUserId);
   const displayName =
@@ -349,6 +354,134 @@ function MemberRow({
   );
 }
 
+function SingleMemberProfileLoader({
+  memberId,
+  onLoaded,
+}: {
+  memberId: string;
+  onLoaded: (id: string, displayName: string) => void;
+}) {
+  const { data: profile } = useGetUserProfile(memberId);
+  useEffect(() => {
+    const name = profile?.displayName ?? memberId.slice(0, 8);
+    onLoaded(memberId, name);
+  }, [memberId, profile?.displayName, onLoaded]);
+  return null;
+}
+
+function SortedMemberList({
+  memberIds,
+  currentUserId,
+  groupOwnerId,
+  conversationId,
+  visibleMembersCount,
+  setVisibleMembersCount,
+  removeGroupMember,
+}: {
+  memberIds: string[];
+  currentUserId: string;
+  groupOwnerId: string | null;
+  conversationId: ConversationId;
+  visibleMembersCount: number;
+  setVisibleMembersCount: React.Dispatch<React.SetStateAction<number>>;
+  removeGroupMember: ReturnType<typeof useRemoveGroupMember>;
+}) {
+  const [profileNames, setProfileNames] = useState<Record<string, string>>({});
+
+  const handleLoaded = useCallback((id: string, displayName: string) => {
+    setProfileNames((prev) => {
+      if (prev[id] === displayName) return prev;
+      return { ...prev, [id]: displayName };
+    });
+  }, []);
+
+  const sortedIds = useMemo(() => {
+    return [...memberIds].sort((a, b) => {
+      const nameA = (profileNames[a] ?? a.slice(0, 8)).toLowerCase();
+      const nameB = (profileNames[b] ?? b.slice(0, 8)).toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+  }, [memberIds, profileNames]);
+
+  const visible = sortedIds.slice(0, visibleMembersCount);
+  const remaining = sortedIds.length - visibleMembersCount;
+
+  return (
+    <>
+      {memberIds.map((id) => (
+        <SingleMemberProfileLoader
+          key={id}
+          memberId={id}
+          onLoaded={handleLoaded}
+        />
+      ))}
+      <ScrollArea className="max-h-48">
+        <div className="flex flex-col gap-1">
+          {visible.map((mIdStr, mi) => {
+            const isMe = mIdStr === currentUserId;
+            return (
+              <MemberRow
+                key={mIdStr}
+                memberId={mIdStr}
+                isMe={isMe}
+                isOwner={mIdStr === groupOwnerId}
+                index={mi}
+                onRemove={() => {
+                  removeGroupMember.mutate(
+                    { conversationId, memberId: mIdStr },
+                    {
+                      onError: () => toast.error("Failed to remove member"),
+                    },
+                  );
+                }}
+              />
+            );
+          })}
+        </div>
+      </ScrollArea>
+      {remaining > 0 && (
+        <button
+          type="button"
+          className="text-xs font-medium mt-1"
+          style={{ color: "oklch(0.82 0.15 72)" }}
+          onClick={() => setVisibleMembersCount((c) => c + 19)}
+        >
+          More ({remaining} remaining)
+        </button>
+      )}
+    </>
+  );
+}
+
+// ─── ReplyQuoteBlock: the quoted snippet shown inside a message bubble ─────────
+function ReplyQuoteBlock({
+  senderUsername,
+  preview,
+}: {
+  senderUsername: string;
+  preview: string;
+}) {
+  return (
+    <div
+      className="rounded-lg px-2.5 py-1.5 mb-1.5 border-l-2 text-xs max-w-full overflow-hidden"
+      style={{
+        borderLeftColor: "oklch(0.82 0.15 72)",
+        background: "oklch(0.82 0.15 72 / 0.08)",
+      }}
+    >
+      <span
+        className="font-semibold block truncate"
+        style={{ color: "oklch(0.82 0.15 72)" }}
+      >
+        @{senderUsername}
+      </span>
+      <span className="text-muted-foreground line-clamp-2 break-words">
+        {preview}
+      </span>
+    </div>
+  );
+}
+
 interface MessageBubbleProps {
   message: Message;
   currentUserId: string;
@@ -362,8 +495,12 @@ interface MessageBubbleProps {
     mediaUrl?: string;
     mediaType?: string;
   }) => void;
+  onReply?: (message: Message) => void;
   index: number;
   conversationId: ConversationId;
+  // Optimistic reactions state managed by parent
+  localReactions: string[];
+  onToggleReaction: (messageId: MessageId) => void;
 }
 
 function MessageBubble({
@@ -375,8 +512,11 @@ function MessageBubble({
   onImageClick,
   onSenderClick,
   onForward,
+  onReply,
   index,
   conversationId,
+  localReactions,
+  onToggleReaction,
 }: MessageBubbleProps) {
   const isSent = message.sender.toString() === currentUserId;
   const senderId = message.sender.toString();
@@ -384,10 +524,31 @@ function MessageBubble({
     isGroup && !isSent ? senderId : null,
   );
   const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(message.content.text ?? "");
   const editMessage = useEditMessage(conversationId);
   const deleteMessage = useDeleteMessage(conversationId);
+
+  // Touch handling for long-press → reply
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStarted = useRef(false);
+
+  const handleTouchStart = useCallback(() => {
+    touchStarted.current = true;
+    longPressTimer.current = setTimeout(() => {
+      if (touchStarted.current && onReply) {
+        onReply(message);
+        // haptic feedback if available
+        if (navigator.vibrate) navigator.vibrate(30);
+      }
+    }, 500);
+  }, [message, onReply]);
+
+  const handleTouchEnd = useCallback(() => {
+    touchStarted.current = false;
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+  }, []);
 
   async function handleSaveEdit() {
     if (!editText.trim()) return;
@@ -399,12 +560,19 @@ function MessageBubble({
   }
 
   const senderName = senderProfile?.displayName ?? senderId.slice(0, 8);
+  const reactionCount = localReactions.length;
+  const iReacted = localReactions.includes(currentUserId);
 
   return (
     <motion.div
       data-ocid={`chat.message.${index + 1}`}
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => {
+        if (!menuOpen) setHovered(false);
+      }}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
@@ -450,6 +618,14 @@ function MessageBubble({
               : "message-bubble-received rounded-bl-sm"
           }`}
         >
+          {/* Reply quote block */}
+          {message.replyTo && (
+            <ReplyQuoteBlock
+              senderUsername={message.replyTo.senderUsername}
+              preview={message.replyTo.preview}
+            />
+          )}
+
           {message.content.mediaUrl &&
             message.content.mediaType &&
             (Date.now() - Number(message.timestamp) / 1_000_000 >
@@ -484,65 +660,138 @@ function MessageBubble({
             />
           </div>
         </div>
-        {/* Forward button on hover */}
-        {hovered && onForward && (
+
+        {/* Reaction badge */}
+        {reactionCount > 0 && (
           <button
             type="button"
-            data-ocid="chat.message.forward_button"
-            onClick={() =>
-              onForward({
-                text: message.content.text ?? "",
-                mediaUrl: message.content.mediaUrl ?? undefined,
-                mediaType: message.content.mediaType
-                  ? ((message.content.mediaType as any).__kind__ ??
-                    Object.keys(message.content.mediaType as any)[0])
-                  : undefined,
-              })
-            }
-            className="p-1.5 rounded-lg hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground shrink-0 self-center"
-            aria-label="Forward message"
+            data-ocid={`chat.message.reaction_badge.${index + 1}`}
+            onClick={() => onToggleReaction(message.id)}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-all mt-0.5"
+            style={{
+              background: iReacted
+                ? "oklch(0.65 0.22 25 / 0.18)"
+                : "oklch(0.82 0.15 72 / 0.08)",
+              border: iReacted
+                ? "1px solid oklch(0.65 0.22 25 / 0.4)"
+                : "1px solid oklch(0.82 0.15 72 / 0.15)",
+              color: iReacted ? "oklch(0.65 0.22 25)" : "text-muted-foreground",
+            }}
+            aria-label={`${reactionCount} reaction${reactionCount !== 1 ? "s" : ""}`}
           >
-            <Share2 className="h-3.5 w-3.5" />
+            ❤ {reactionCount}
           </button>
         )}
-        {/* Edit/Delete menu for own messages */}
-        {isSent && hovered && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                data-ocid={`chat.message.edit_button.${index + 1}`}
-                className="p-1.5 rounded-lg hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground shrink-0 self-center"
-                aria-label="Message options"
-              >
-                <MoreVertical className="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-card border-border">
-              {message.content.text && (
-                <DropdownMenuItem
-                  onClick={() => {
-                    setEditText(message.content.text ?? "");
-                    setIsEditing(true);
-                  }}
-                  className="cursor-pointer"
-                  data-ocid={`chat.message.edit_item.${index + 1}`}
+
+        {/* Action buttons on hover */}
+        <div
+          className={`flex items-center gap-0.5 mt-0.5 ${
+            isSent ? "flex-row-reverse" : "flex-row"
+          }`}
+        >
+          {/* Heart reaction button */}
+          {(hovered || menuOpen) && (
+            <button
+              type="button"
+              data-ocid={`chat.message.react_button.${index + 1}`}
+              onClick={() => onToggleReaction(message.id)}
+              className="p-1.5 rounded-lg hover:bg-muted/60 transition-colors shrink-0 self-center"
+              style={{
+                color: iReacted ? "oklch(0.65 0.22 25)" : undefined,
+              }}
+              aria-label={iReacted ? "Remove reaction" : "React with heart"}
+            >
+              <span className="text-sm leading-none">
+                {iReacted ? "❤" : "🤍"}
+              </span>
+            </button>
+          )}
+
+          {/* Reply button */}
+          {(hovered || menuOpen) && onReply && (
+            <button
+              type="button"
+              data-ocid={`chat.message.reply_button.${index + 1}`}
+              onClick={() => onReply(message)}
+              className="p-1.5 rounded-lg hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground shrink-0 self-center"
+              aria-label="Reply to message"
+            >
+              <Reply className="h-3.5 w-3.5" />
+            </button>
+          )}
+
+          {/* Forward button */}
+          {(hovered || menuOpen) && onForward && (
+            <button
+              type="button"
+              data-ocid="chat.message.forward_button"
+              onClick={() =>
+                onForward({
+                  text: message.content.text ?? "",
+                  mediaUrl: message.content.mediaUrl ?? undefined,
+                  mediaType: message.content.mediaType
+                    ? ((message.content.mediaType as { __kind__: string })
+                        .__kind__ ??
+                      Object.keys(message.content.mediaType as object)[0])
+                    : undefined,
+                })
+              }
+              className="p-1.5 rounded-lg hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground shrink-0 self-center"
+              aria-label="Forward message"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+
+          {/* Edit/Delete menu for own messages */}
+          {isSent && (hovered || menuOpen) && (
+            <DropdownMenu
+              open={menuOpen}
+              onOpenChange={(open) => {
+                setMenuOpen(open);
+                if (!open) setHovered(false);
+              }}
+            >
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  data-ocid={`chat.message.edit_button.${index + 1}`}
+                  className="p-1.5 rounded-lg hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground shrink-0 self-center"
+                  aria-label="Message options"
                 >
-                  <Pencil className="h-3.5 w-3.5 mr-2" />
-                  Edit
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onClick={() => deleteMessage.mutate(message.id)}
-                className="cursor-pointer text-destructive focus:text-destructive"
-                data-ocid={`chat.message.delete_item.${index + 1}`}
+                  <MoreVertical className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="bg-card border-border"
               >
-                <Trash2 className="h-3.5 w-3.5 mr-2" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+                {message.content.text && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setEditText(message.content.text ?? "");
+                      setIsEditing(true);
+                    }}
+                    className="cursor-pointer"
+                    data-ocid={`chat.message.edit_item.${index + 1}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5 mr-2" />
+                    Edit
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={() => deleteMessage.mutate(message.id)}
+                  className="cursor-pointer text-destructive focus:text-destructive"
+                  data-ocid={`chat.message.delete_item.${index + 1}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+
         {/* Inline edit mode */}
         {isEditing && (
           <div className="flex gap-1 mt-1 w-full">
@@ -594,7 +843,6 @@ interface ChatViewProps {
   onOpenUserProfile?: (userId: string) => void;
 }
 
-// RecentContactChip: renders a single contact chip for adding to a group
 function RecentContactChip({
   userId,
   onAdd,
@@ -665,7 +913,6 @@ function RecentContactChip({
   );
 }
 
-// RecentContactChips: renders a scrollable row of chips for users from recent DM conversations
 function RecentContactChips({
   conversations,
   currentMembers,
@@ -686,7 +933,6 @@ function RecentContactChips({
     )
     .filter((id): id is string => !!id && !currentMembers.includes(id));
 
-  // deduplicate
   const unique = Array.from(new Set(candidates));
 
   if (unique.length === 0) {
@@ -748,6 +994,14 @@ export default function ChatView({
   const [visibleMsgCount, setVisibleMsgCount] = useState(19);
   const [visibleMembersCount, setVisibleMembersCount] = useState(19);
 
+  // Reply threading state
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+
+  // Optimistic reactions: map messageId → Set of userId strings
+  const [localReactionMap, setLocalReactionMap] = useState<
+    Record<string, string[]>
+  >({});
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMessageCountRef = useRef(0);
@@ -782,7 +1036,7 @@ export default function ChatView({
   const groupAvatarUrl = conversationId
     ? groupAvatarMap.get(conversationId.toString())
     : undefined;
-  const { actor } = useActor();
+  const { actor } = useActor(createActor);
   const isGroupOwner = !!groupCreators?.find(
     ([cid, creatorId]) =>
       cid.toString() === conversationId?.toString() &&
@@ -793,13 +1047,15 @@ export default function ChatView({
     groupCreators
       ?.find(([cid]) => cid.toString() === conversationId?.toString())?.[1]
       ?.toString() ?? null;
+
   async function handleAddMemberByUsername(username: string) {
     if (!conversationId) return;
     try {
       await addGroupMember.mutateAsync({ conversationId, username });
       toast.success(`Added @${username}`);
-    } catch (e: any) {
-      toast.error(e?.message ?? `Failed to add @${username}`);
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      toast.error(err?.message ?? `Failed to add @${username}`);
     }
   }
 
@@ -828,6 +1084,70 @@ export default function ChatView({
 
   const msgCount = messages.length;
 
+  // Sync backend reactions into localReactionMap whenever messages refresh
+  useEffect(() => {
+    if (messages.length === 0) return;
+    setLocalReactionMap((prev) => {
+      const next = { ...prev };
+      for (const msg of messages) {
+        const key = msg.id.toString();
+        // Only update from backend if we don't have a pending local value
+        // (prevent flicker: keep local state if it's ahead of server)
+        next[key] = msg.reactions.map((r) => r.toString());
+      }
+      return next;
+    });
+  }, [messages]);
+
+  // Toggle reaction — optimistic update then call backend
+  const handleToggleReaction = useCallback(
+    async (messageId: MessageId) => {
+      if (!actor) return;
+      const key = messageId.toString();
+      const current = localReactionMap[key] ?? [];
+      const alreadyReacted = current.includes(currentUserId);
+
+      // Optimistic update
+      setLocalReactionMap((prev) => {
+        const existing = prev[key] ?? [];
+        const updated = alreadyReacted
+          ? existing.filter((id) => id !== currentUserId)
+          : [...existing, currentUserId];
+        return { ...prev, [key]: updated };
+      });
+
+      try {
+        if (alreadyReacted) {
+          await (
+            actor as unknown as {
+              removeMessageReaction: (
+                c: ConversationId,
+                m: MessageId,
+              ) => Promise<void>;
+            }
+          ).removeMessageReaction(conversationId, messageId);
+        } else {
+          await (
+            actor as unknown as {
+              addMessageReaction: (
+                c: ConversationId,
+                m: MessageId,
+              ) => Promise<void>;
+            }
+          ).addMessageReaction(conversationId, messageId);
+        }
+      } catch {
+        // Revert optimistic update on failure
+        setLocalReactionMap((prev) => ({
+          ...prev,
+          [key]: current,
+        }));
+        toast.error("Failed to update reaction");
+      }
+    },
+    [actor, conversationId, currentUserId, localReactionMap],
+  );
+
   useEffect(() => {
     if (conversationId) markRead(conversationId);
   }, [conversationId, markRead]);
@@ -843,9 +1163,10 @@ export default function ChatView({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
     setVisibleMsgCount(19);
+    setReplyingTo(null);
+    setLocalReactionMap({});
   }, [conversationId]);
 
-  // Clean up timer on unmount
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
@@ -891,8 +1212,9 @@ export default function ChatView({
       setGiftGoldOpen(false);
       setGiftAmount("");
       setGiftError("");
-    } catch (e: any) {
-      toast.error(e?.message ?? "Transfer failed");
+    } catch (e: unknown) {
+      const err = e as { message?: string };
+      toast.error(err?.message ?? "Transfer failed");
     }
   };
 
@@ -914,6 +1236,8 @@ export default function ChatView({
       }
     }
 
+    const replyToId = replyingTo?.id;
+
     try {
       await sendMessage({
         conversationId,
@@ -923,9 +1247,11 @@ export default function ChatView({
             ...(mediaUrl ? { mediaUrl } : {}),
             ...(mediaType ? { mediaType } : {}),
           },
+          ...(replyToId !== undefined ? { replyToMessageId: replyToId } : {}),
         },
       });
       setText("");
+      setReplyingTo(null);
     } catch {
       toast.error("Failed to send message");
     }
@@ -936,9 +1262,11 @@ export default function ChatView({
       e.preventDefault();
       handleSend();
     }
+    if (e.key === "Escape" && replyingTo) {
+      setReplyingTo(null);
+    }
   };
 
-  // Voice recording — click to start
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -970,7 +1298,6 @@ export default function ChatView({
     }
   }, []);
 
-  // Cancel without sending
   const cancelRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
     if (recorder && recorder.state !== "inactive") {
@@ -983,7 +1310,6 @@ export default function ChatView({
     setRecordingSeconds(0);
   }, []);
 
-  // Stop and send the recording
   const sendRecording = useCallback(async () => {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state === "inactive") return;
@@ -1247,7 +1573,7 @@ export default function ChatView({
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Edit group name dialog */}
+        {/* Edit group dialog */}
         <Dialog
           open={editGroupOpen}
           onOpenChange={(v) => {
@@ -1255,92 +1581,121 @@ export default function ChatView({
             if (!v) setGroupAvatarPreview(null);
           }}
         >
-          <DialogContent className="bg-card border-border overflow-y-auto max-h-[90dvh] pb-safe">
+          <DialogContent
+            className="bg-card border-border overflow-y-auto"
+            style={{
+              maxHeight: "min(90dvh, 90vh)",
+              paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
+            }}
+          >
             <DialogHeader>
               <DialogTitle>Edit Group</DialogTitle>
             </DialogHeader>
             <div className="flex flex-col gap-4 pt-2">
-              {/* Group avatar picker */}
-              <div className="flex flex-col items-center gap-2">
-                <button
-                  type="button"
-                  data-ocid="chat.group.upload_button"
-                  onClick={() => groupAvatarInputRef.current?.click()}
-                  className="relative w-16 h-16 rounded-full overflow-hidden border-2 border-dashed border-primary/50 hover:border-primary transition-colors flex items-center justify-center bg-muted/30"
-                >
-                  {groupAvatarPreview || groupAvatarUrl ? (
-                    <img
-                      src={groupAvatarPreview ?? groupAvatarUrl ?? ""}
-                      alt="Group avatar"
-                      className="w-full h-full object-cover"
+              {isGroupOwner ? (
+                <>
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      type="button"
+                      data-ocid="chat.group.upload_button"
+                      onClick={() => groupAvatarInputRef.current?.click()}
+                      className="relative w-16 h-16 rounded-full overflow-hidden border-2 border-dashed border-primary/50 hover:border-primary transition-colors flex items-center justify-center bg-muted/30"
+                    >
+                      {groupAvatarPreview || groupAvatarUrl ? (
+                        <img
+                          src={groupAvatarPreview ?? groupAvatarUrl ?? ""}
+                          alt="Group avatar"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-xs text-muted-foreground text-center px-1">
+                          Avatar
+                        </span>
+                      )}
+                      <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                        <span className="text-white text-xs">Change</span>
+                      </div>
+                    </button>
+                    <input
+                      ref={groupAvatarInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file || !conversationId) return;
+                        const preview = URL.createObjectURL(file);
+                        setGroupAvatarPreview(preview);
+                        try {
+                          const { url } = await uploadMedia(file);
+                          await updateGroupAvatar({
+                            conversationId,
+                            avatarUrl: url,
+                          });
+                          toast.success("Group avatar updated");
+                        } catch {
+                          toast.error("Failed to update avatar");
+                          setGroupAvatarPreview(null);
+                        }
+                      }}
                     />
-                  ) : (
-                    <span className="text-xs text-muted-foreground text-center px-1">
-                      Avatar
-                    </span>
-                  )}
-                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                    <span className="text-white text-xs">Change</span>
                   </div>
-                </button>
-                <input
-                  ref={groupAvatarInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file || !conversationId) return;
-                    const preview = URL.createObjectURL(file);
-                    setGroupAvatarPreview(preview);
-                    try {
-                      const { url } = await uploadMedia(file);
-                      await updateGroupAvatar({
-                        conversationId,
-                        avatarUrl: url,
-                      });
-                      toast.success("Group avatar updated");
-                    } catch {
-                      toast.error("Failed to update avatar");
-                      setGroupAvatarPreview(null);
-                    }
-                  }}
-                />
-              </div>
-              <Input
-                data-ocid="chat.group.input"
-                value={newGroupName}
-                onChange={(e) => setNewGroupName(e.target.value)}
-                placeholder="Group name"
-                className="bg-input border-border"
-              />
-              <Button
-                data-ocid="chat.group.save_button"
-                disabled={!newGroupName.trim()}
-                onClick={async () => {
-                  if (!conversationId || !newGroupName.trim() || !actor) return;
-                  try {
-                    await actor.updateGroupName(
-                      conversationId,
-                      newGroupName.trim(),
-                    );
-                    toast.success("Group name updated");
-                    setEditGroupOpen(false);
-                  } catch {
-                    toast.error("Failed to update group name");
-                  }
-                }}
-                style={{
-                  background:
-                    "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
-                  color: "oklch(0.08 0.004 55)",
-                }}
-                className="rounded-xl"
-              >
-                Save
-              </Button>
+                  <Input
+                    data-ocid="chat.group.input"
+                    value={newGroupName}
+                    onChange={(e) => setNewGroupName(e.target.value)}
+                    placeholder="Group name"
+                    className="bg-input border-border"
+                  />
+                  <Button
+                    data-ocid="chat.group.save_button"
+                    disabled={!newGroupName.trim()}
+                    onClick={async () => {
+                      if (!conversationId || !newGroupName.trim() || !actor)
+                        return;
+                      try {
+                        await actor.updateGroupName(
+                          conversationId,
+                          newGroupName.trim(),
+                        );
+                        toast.success("Group name updated");
+                        setEditGroupOpen(false);
+                      } catch {
+                        toast.error("Failed to update group name");
+                      }
+                    }}
+                    style={{
+                      background:
+                        "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                      color: "oklch(0.08 0.004 55)",
+                    }}
+                    className="rounded-xl"
+                  >
+                    Save
+                  </Button>
+                </>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-border flex items-center justify-center bg-muted/30">
+                    {groupAvatarUrl ? (
+                      <img
+                        src={groupAvatarUrl}
+                        alt="Group avatar"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground text-center px-1">
+                        Avatar
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm font-medium">{newGroupName}</p>
+                  <p className="text-xs text-muted-foreground text-center">
+                    Only the group owner can edit the group name and avatar
+                  </p>
+                </div>
+              )}
 
-              {/* Manage Members — owner only */}
               {isGroupOwner && (
                 <div
                   data-ocid="chat.manage_members.section"
@@ -1360,52 +1715,18 @@ export default function ChatView({
                     </span>
                   </div>
 
-                  {/* Current members */}
-                  <ScrollArea className="max-h-48">
-                    <div className="flex flex-col gap-1">
-                      {(conversation?.members ?? [])
-                        .slice(0, visibleMembersCount)
-                        .map((memberId, mi) => {
-                          const mIdStr = memberId.toString();
-                          const isMe = mIdStr === currentUserId;
-                          return (
-                            <MemberRow
-                              key={mIdStr}
-                              memberId={mIdStr}
-                              isMe={isMe}
-                              isOwner={mIdStr === groupOwnerId}
-                              index={mi}
-                              onRemove={() => {
-                                if (!conversationId) return;
-                                removeGroupMember.mutate(
-                                  { conversationId, memberId: mIdStr },
-                                  {
-                                    onError: () =>
-                                      toast.error("Failed to remove member"),
-                                  },
-                                );
-                              }}
-                            />
-                          );
-                        })}
-                    </div>
-                  </ScrollArea>
-                  {(conversation?.members ?? []).length >
-                    visibleMembersCount && (
-                    <button
-                      type="button"
-                      className="text-xs font-medium mt-1"
-                      style={{ color: "oklch(0.82 0.15 72)" }}
-                      onClick={() => setVisibleMembersCount((c) => c + 19)}
-                    >
-                      More (
-                      {(conversation?.members ?? []).length -
-                        visibleMembersCount}{" "}
-                      remaining)
-                    </button>
-                  )}
+                  <SortedMemberList
+                    memberIds={(conversation?.members ?? []).map((m) =>
+                      m.toString(),
+                    )}
+                    currentUserId={currentUserId}
+                    groupOwnerId={groupOwnerId}
+                    conversationId={conversationId}
+                    visibleMembersCount={visibleMembersCount}
+                    setVisibleMembersCount={setVisibleMembersCount}
+                    removeGroupMember={removeGroupMember}
+                  />
 
-                  {/* Add member from recent chats */}
                   <div>
                     <p
                       className="text-xs font-medium mb-2"
@@ -1463,9 +1784,13 @@ export default function ChatView({
                 const showSender =
                   !prevMsg ||
                   prevMsg.sender.toString() !== msg.sender.toString();
+                const msgKey = msg.id.toString();
+                const localReactions =
+                  localReactionMap[msgKey] ??
+                  msg.reactions.map((r) => r.toString());
                 return (
                   <MessageBubble
-                    key={msg.id.toString()}
+                    key={msgKey}
                     message={msg}
                     currentUserId={currentUserId}
                     memberCount={memberCount}
@@ -1477,8 +1802,11 @@ export default function ChatView({
                       setForwardMsgContent(msgContent);
                       setForwardMsgOpen(true);
                     }}
+                    onReply={(m) => setReplyingTo(m)}
                     index={idx}
                     conversationId={conversationId}
+                    localReactions={localReactions}
+                    onToggleReaction={handleToggleReaction}
                   />
                 );
               })}
@@ -1551,6 +1879,51 @@ export default function ChatView({
         )}
       </AnimatePresence>
 
+      {/* Reply bar */}
+      <AnimatePresence>
+        {replyingTo && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="px-4 py-2 border-t border-border bg-muted/20 shrink-0 flex items-center gap-2"
+            data-ocid="chat.reply_bar"
+          >
+            <div
+              className="flex-1 rounded-lg px-3 py-1.5 border-l-2 text-xs min-w-0"
+              style={{
+                borderLeftColor: "oklch(0.82 0.15 72)",
+                background: "oklch(0.82 0.15 72 / 0.07)",
+              }}
+            >
+              <span
+                className="font-semibold block"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              >
+                Replying to @
+                {replyingTo.sender.toString() === currentUserId
+                  ? "you"
+                  : replyingTo.sender.toString().slice(0, 8)}
+              </span>
+              <span className="text-muted-foreground truncate block">
+                {replyingTo.content.text
+                  ? replyingTo.content.text.slice(0, 60)
+                  : "📎 Media"}
+              </span>
+            </div>
+            <button
+              type="button"
+              data-ocid="chat.reply_bar.cancel"
+              onClick={() => setReplyingTo(null)}
+              className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              aria-label="Cancel reply"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Input area */}
       <div
         className="px-4 py-3 border-t border-border bg-sidebar shrink-0"
@@ -1565,7 +1938,6 @@ export default function ChatView({
               exit={{ opacity: 0, scale: 0.95 }}
               className="flex items-center gap-3"
             >
-              {/* Cancel */}
               <Button
                 data-ocid="chat.cancel_button"
                 size="icon"
@@ -1577,7 +1949,6 @@ export default function ChatView({
                 <X className="h-5 w-5 text-muted-foreground" />
               </Button>
 
-              {/* Recording indicator */}
               <div className="flex-1 flex items-center gap-2 bg-muted/30 rounded-xl px-3 h-10">
                 <div
                   className="w-2.5 h-2.5 rounded-full animate-pulse shrink-0"
@@ -1594,7 +1965,6 @@ export default function ChatView({
                 </span>
               </div>
 
-              {/* Send recording */}
               <Button
                 data-ocid="chat.send_button"
                 size="icon"
@@ -1657,7 +2027,7 @@ export default function ChatView({
 
               <Input
                 data-ocid="chat.message_input"
-                placeholder="Message..."
+                placeholder={replyingTo ? "Type a reply..." : "Message..."}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -1669,7 +2039,6 @@ export default function ChatView({
                 enterKeyHint="send"
               />
 
-              {/* Mic button — click to start recording */}
               {!text.trim() && !pendingFile && (
                 <Button
                   data-ocid="chat.toggle"
@@ -1868,7 +2237,9 @@ export default function ChatView({
                       text: forwardMsgContent.text || "",
                       mediaUrl: forwardMsgContent.mediaUrl,
                       mediaType: forwardMsgContent.mediaType
-                        ? ({ [forwardMsgContent.mediaType]: null } as any)
+                        ? ({
+                            [forwardMsgContent.mediaType]: null,
+                          } as unknown as MediaType)
                         : undefined,
                     },
                   },

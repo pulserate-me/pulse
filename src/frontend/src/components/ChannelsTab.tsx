@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Loader2, Plus, Radio, Search, Users } from "lucide-react";
 import { useState } from "react";
+import type { Channel } from "../backend.d";
 import {
   useFollowChannel,
   useGetAllChannels,
@@ -16,6 +17,19 @@ import { getChannelLastViewed } from "../lib/channelUtils";
 import CreateChannelModal from "./CreateChannelModal";
 
 const PAGE_SIZE = 9;
+
+const CATEGORIES = [
+  "All",
+  "Music",
+  "Finance",
+  "Sports",
+  "News",
+  "Entertainment",
+  "Technology",
+  "Health",
+  "Education",
+  "Other",
+] as const;
 
 function getInitials(name: string) {
   return name
@@ -71,6 +85,8 @@ function ChannelCard({
   const { mutate: unfollow, isPending: unfollowing } = useUnfollowChannel();
   const isOwner = channel.owner.toString() === currentUserId;
   const ocid = index + 1;
+  // category comes from the backend Channel type
+  const category = (channel as Channel).category;
 
   const handleFollowClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -119,7 +135,7 @@ function ChannelCard({
       </button>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5 mb-0.5">
+        <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
           <span className="font-semibold text-sm text-foreground truncate">
             {channel.name}
           </span>
@@ -132,6 +148,18 @@ function ChannelCard({
               }}
             >
               Owner
+            </span>
+          )}
+          {category && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 font-medium"
+              style={{
+                background: "oklch(0.82 0.15 72 / 0.12)",
+                color: "oklch(0.82 0.15 72)",
+                border: "1px solid oklch(0.82 0.15 72 / 0.25)",
+              }}
+            >
+              {category}
             </span>
           )}
           {isFollowing && !isOwner && (
@@ -175,6 +203,8 @@ function ChannelCard({
   );
 }
 
+// Channel type with optional category is imported from backend.d
+
 interface ChannelsTabProps {
   currentUserId: string;
   onSelectChannel: (id: ChannelId) => void;
@@ -187,13 +217,19 @@ export default function ChannelsTab({
   onAvatarClick,
 }: ChannelsTabProps) {
   const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [createOpen, setCreateOpen] = useState(false);
   const [page, setPage] = useState(1);
   const { data: channels = [], isLoading } = useGetAllChannels();
 
   const filtered = channels.filter((c) => {
-    if (!search.trim()) return true;
-    return c.channel.name.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch =
+      !search.trim() ||
+      c.channel.name.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory =
+      selectedCategory === "All" ||
+      (c.channel as Channel).category === selectedCategory;
+    return matchesSearch && matchesCategory;
   });
 
   const visibleChannels = filtered.slice(0, page * PAGE_SIZE);
@@ -201,6 +237,11 @@ export default function ChannelsTab({
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
+    setPage(1);
+  };
+
+  const handleCategoryChange = (cat: string) => {
+    setSelectedCategory(cat);
     setPage(1);
   };
 
@@ -236,7 +277,7 @@ export default function ChannelsTab({
             <Plus className="h-4 w-4" />
           </Button>
         </div>
-        <div className="relative">
+        <div className="relative mb-3">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             data-ocid="channels.search_input"
@@ -245,6 +286,35 @@ export default function ChannelsTab({
             onChange={handleSearchChange}
             className="pl-9 bg-input border-border h-8 text-sm"
           />
+        </div>
+
+        {/* Category filter bar */}
+        <div
+          className="flex gap-1.5 overflow-x-auto scrollbar-none pb-0.5"
+          data-ocid="channels.category_filter"
+        >
+          {CATEGORIES.map((cat) => {
+            const isActive = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => handleCategoryChange(cat)}
+                className="shrink-0 text-[11px] px-2.5 py-1 rounded-full border transition-all font-medium"
+                style={{
+                  background: isActive ? "oklch(0.82 0.15 72)" : "transparent",
+                  color: isActive
+                    ? "oklch(0.08 0.004 55)"
+                    : "oklch(0.65 0.05 55)",
+                  borderColor: isActive
+                    ? "oklch(0.82 0.15 72)"
+                    : "oklch(0.3 0.01 55)",
+                }}
+              >
+                {cat}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -280,9 +350,11 @@ export default function ChannelsTab({
               />
             </div>
             <p className="text-sm font-medium text-muted-foreground">
-              {search ? "No channels found" : "No channels yet"}
+              {search || selectedCategory !== "All"
+                ? "No channels found"
+                : "No channels yet"}
             </p>
-            {!search && (
+            {!search && selectedCategory === "All" && (
               <p className="text-xs text-muted-foreground/60 mt-1">
                 Tap + to create the first one
               </p>

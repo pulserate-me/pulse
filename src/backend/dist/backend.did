@@ -1,0 +1,372 @@
+type _ImmutableObjectStorageRefillResult = 
+ record {
+   success: opt bool;
+   topped_up_amount: opt nat;
+ };
+type _ImmutableObjectStorageRefillInformation = record {
+                                                  proposed_top_up_amount:
+                                                   opt nat;};
+type _ImmutableObjectStorageCreateCertificateResult = 
+ record {
+   blob_hash: text;
+   method: text;
+ };
+type UserRole = 
+ variant {
+   admin;
+   guest;
+   user;
+ };
+type UserProfile = 
+ record {
+   avatarUrl: opt text;
+   bio: opt text;
+   displayName: text;
+   lastSeen: Timestamp;
+   username: text;
+ };
+type UserId = principal;
+type Timestamp = int;
+type StatusInteractions = 
+ record {
+   comments: vec StatusCommentWithProfile;
+   likeCount: nat;
+   likedByMe: bool;
+   viewCount: nat;
+ };
+type StatusId = nat;
+type StatusContent = 
+ record {
+   mediaType: opt MediaType;
+   mediaUrl: opt text;
+   "text": text;
+ };
+type StatusCommentWithProfile = 
+ record {
+   author: UserProfile;
+   id: CommentId;
+   "text": text;
+   timestamp: Timestamp;
+ };
+type Status = 
+ record {
+   author: UserId;
+   content: StatusContent;
+   id: StatusId;
+   timestamp: Timestamp;
+ };
+type ReplyToInfo = 
+ record {
+   messageId: MessageId;
+   preview: text;
+   senderUsername: text;
+ };
+type NotificationKind = 
+ variant {
+   channelFollowed: record {
+                      byUsername: text;
+                      channelId: nat;
+                    };
+   channelPostCommented:
+    record {
+      byUsername: text;
+      channelId: nat;
+      postId: nat;
+    };
+   channelPostLiked: record {
+                       byUsername: text;
+                       channelId: nat;
+                       postId: nat;
+                     };
+   goldGifted: record {
+                 amount: nat;
+                 fromUsername: text;
+               };
+   storyCommented: record {
+                     byUsername: text;
+                     statusId: nat;
+                   };
+   storyLiked: record {
+                 byUsername: text;
+                 statusId: nat;
+               };
+ };
+type NotificationId = nat;
+type MessageReadReceipt = 
+ record {
+   timestamp: Timestamp;
+   userId: UserId;
+ };
+type MessageInput = 
+ record {
+   content: MessageContent;
+   replyToMessageId: opt MessageId;
+ };
+type MessageId = nat;
+type MessageContent = 
+ record {
+   mediaType: opt MediaType;
+   mediaUrl: opt text;
+   "text": text;
+ };
+type Message = 
+ record {
+   content: MessageContent;
+   id: MessageId;
+   reactions: vec UserId;
+   readReceipts: vec MessageReadReceipt;
+   replyTo: opt ReplyToInfo;
+   sender: UserId;
+   timestamp: Timestamp;
+ };
+type MediaType = 
+ variant {
+   audio;
+   document;
+   image;
+   other: text;
+   video;
+ };
+type GoldTxType = 
+ variant {
+   buyRequest;
+   claimed;
+   received;
+   sellRequest;
+   sent;
+ };
+type GoldTxId = nat;
+type GoldTransaction = 
+ record {
+   amount: nat;
+   counterpartyUsername: opt text;
+   id: GoldTxId;
+   timestamp: Timestamp;
+   txType: GoldTxType;
+ };
+type DealerInfo = 
+ record {
+   avatarUrl: opt text;
+   balance: nat;
+   username: text;
+ };
+type ConversationType = 
+ variant {
+   direct;
+   group: text;
+ };
+type ConversationId = nat;
+type Conversation = 
+ record {
+   id: ConversationId;
+   lastMessageTimestamp: int;
+   members: vec UserId;
+   messages: vec Message;
+   "type": ConversationType;
+ };
+type CommentId = nat;
+type ChannelWithMeta = 
+ record {
+   channel: Channel;
+   followerCount: nat;
+   isFollowing: bool;
+   ownerProfile: UserProfile;
+ };
+type ChannelPostInteractions = 
+ record {
+   comments: vec ChannelCommentWithProfile;
+   likeCount: nat;
+   likedByMe: bool;
+ };
+type ChannelPostId = nat;
+type ChannelPostContent = 
+ record {
+   mediaType: opt MediaType;
+   mediaUrl: opt text;
+   "text": text;
+ };
+type ChannelPost = 
+ record {
+   author: UserId;
+   channelId: ChannelId;
+   content: ChannelPostContent;
+   id: ChannelPostId;
+   timestamp: Timestamp;
+ };
+type ChannelId = nat;
+type ChannelCommentWithProfile = 
+ record {
+   author: UserProfile;
+   id: ChannelCommentId;
+   "text": text;
+   timestamp: Timestamp;
+ };
+type ChannelCommentId = nat;
+type Channel = 
+ record {
+   avatarUrl: opt text;
+   category: opt text;
+   createdAt: Timestamp;
+   description: text;
+   id: ChannelId;
+   name: text;
+   owner: UserId;
+ };
+type AppNotification = 
+ record {
+   id: NotificationId;
+   kind: NotificationKind;
+   read: bool;
+   timestamp: Timestamp;
+ };
+service : {
+  _immutableObjectStorageBlobsAreLive: (hashes: vec blob) -> (vec bool) query;
+  _immutableObjectStorageBlobsToDelete: () -> (vec blob) query;
+  _immutableObjectStorageConfirmBlobDeletion: (blobs: vec blob) -> ();
+  _immutableObjectStorageCreateCertificate: (blobHash: text) ->
+   (_ImmutableObjectStorageCreateCertificateResult);
+  _immutableObjectStorageRefillCashier: (refillInformation:
+   opt _ImmutableObjectStorageRefillInformation) ->
+   (_ImmutableObjectStorageRefillResult);
+  _immutableObjectStorageUpdateGatewayPrincipals: () -> ();
+  _initializeAccessControl: () -> ();
+  addChannelPost: (channelId: ChannelId, content: ChannelPostContent) ->
+   (ChannelPostId);
+  addGroupMember: (conversationId: ConversationId, username: text) -> ();
+  addMessageReaction: (conversationId: ConversationId, messageId:
+   MessageId) -> ();
+  addStatus: (content: StatusContent) -> (StatusId);
+  adminClaimGold: (amount: nat) -> ();
+  assignCallerUserRole: (user: principal, role: UserRole) -> ();
+  blockUser: (targetUserId: UserId) -> ();
+  commentOnChannelPost: (postId: ChannelPostId, "text": text) ->
+   (ChannelCommentId);
+  commentOnStatus: (statusId: StatusId, "text": text) -> (CommentId);
+  createChannel: (name: text, description: text, avatarUrl: opt text,
+   category: opt text) -> (ChannelId);
+  createDirectConversation: (otherUser: UserId) -> (ConversationId);
+  createGroupConversation: (name: text, members: vec UserId, groupAvatarUrl:
+   opt text) -> (ConversationId);
+  deleteChannel: (channelId: ChannelId) -> ();
+  deleteChannelPost: (postId: ChannelPostId) -> ();
+  deleteGroupName: (conversationId: ConversationId) -> ();
+  deleteHighlight: (statusId: StatusId) -> ();
+  deleteMessage: (conversationId: ConversationId, messageId: MessageId) -> ();
+  editChannelPost: (postId: ChannelPostId, newContent: ChannelPostContent) ->
+   ();
+  editMessage: (conversationId: ConversationId, messageId: MessageId,
+   newText: text) -> ();
+  followChannel: (channelId: ChannelId) -> ();
+  forwardChannelPost: (postId: ChannelPostId, conversationId:
+   ConversationId) -> (MessageId);
+  getActiveUsersCount: () -> (nat) query;
+  getAdminTotalClaimed: () -> (nat) query;
+  getAllChannels: () -> (vec ChannelWithMeta) query;
+  getAllStories: () -> (vec record {
+                              UserProfile;
+                              vec Status;
+                            }) query;
+  getCallerUserProfile: () -> (opt UserProfile) query;
+  getCallerUserRole: () -> (UserRole) query;
+  getChannel: (channelId: ChannelId) -> (opt ChannelWithMeta) query;
+  getChannelPostInteractions: (postId: ChannelPostId) ->
+   (ChannelPostInteractions) query;
+  getChannelPosts: (channelId: ChannelId) -> (vec ChannelPost) query;
+  getChannelsByCategory: (category: text) -> (vec ChannelWithMeta) query;
+  getContactStatuses: () -> (vec record {
+                                   UserProfile;
+                                   vec Status;
+                                 }) query;
+  getConversation: (conversationId: ConversationId) ->
+   (opt Conversation) query;
+  getGroupAvatars: () -> (vec record {
+                                ConversationId;
+                                text;
+                              }) query;
+  getGroupCreators: () -> (vec record {
+                                 ConversationId;
+                                 UserId;
+                               }) query;
+  getHighlights: (userId: UserId) -> (vec Status) query;
+  getMessageReactions: (conversationId: ConversationId, messageId:
+   MessageId) -> (vec UserId) query;
+  getMessageReadReceipts: (conversationId: ConversationId, messageId:
+   MessageId) -> (opt vec MessageReadReceipt) query;
+  getMessages: (conversationId: ConversationId, offset: nat, limit: nat) ->
+   (vec Message) query;
+  getMyBlockedUsers: () -> (vec UserProfile) query;
+  getMyConversations: () -> (vec Conversation) query;
+  getMyGoldBalance: () -> (nat) query;
+  getMyGoldTransactions: () -> (vec GoldTransaction) query;
+  getMyNotifications: () -> (vec AppNotification) query;
+  getMyStatuses: () -> (vec Status) query;
+  getMyTransactionHistory: () -> (vec GoldTransaction) query;
+  getPaginatedMessages: (conversationId: ConversationId, offset: nat, limit:
+   nat) -> (vec Message) query;
+  getStatusInteractions: (statusId: StatusId) -> (StatusInteractions) query;
+  getStoryViewers: (statusId: StatusId) -> (vec text) query;
+  getStoryViewersList: (statusId: StatusId) -> (vec text) query;
+  getTotalChannelsCreated: () -> (nat) query;
+  getTotalGoldVolume: () -> (float64) query;
+  getTotalMessagesCount: () -> (nat) query;
+  getTotalStoriesPosted: () -> (nat) query;
+  getTotalUsers: () -> (nat) query;
+  getUnreadCount: (conversationId: ConversationId) -> (nat) query;
+  getUserByPrincipal: (userId: UserId) -> (opt UserProfile) query;
+  getUserChannelsCreated: () -> (nat) query;
+  getUserMessageCount: () -> (nat) query;
+  getUserProfile: (userId: UserId) -> (opt UserProfile) query;
+  getUserStoriesPosted: () -> (nat) query;
+  getUsersWithGoldAbove: (threshold: nat) -> (vec DealerInfo) query;
+  isBlockedBy: (targetUserId: UserId) -> (bool) query;
+  isCallerAdmin: () -> (bool) query;
+  isHighlighted: (statusId: StatusId) -> (bool) query;
+  isUserOnline: (userId: UserId) -> (bool) query;
+  leaveConversation: (conversationId: ConversationId) -> ();
+  likeChannelPost: (postId: ChannelPostId) -> ();
+  likeStatus: (statusId: StatusId) -> ();
+  listUserConversations: () -> (vec Conversation) query;
+  markAsRead: (conversationId: ConversationId) -> ();
+  markMessagesAsRead: (conversationId: ConversationId) -> ();
+  markNotificationsRead: () -> ();
+  recordStoryView: (statusId: StatusId) -> ();
+  removeFromHighlights: (statusId: StatusId) -> (variant {
+                                                   err: text;
+                                                   ok;
+                                                 });
+  removeGroupMember: (conversationId: ConversationId, memberId: UserId) -> ();
+  removeMessageReaction: (conversationId: ConversationId, messageId:
+   MessageId) -> ();
+  requestBuyGold: (amount: nat) -> ();
+  requestSellGold: (amount: nat) -> ();
+  saveCallerUserProfile: (profile: UserProfile) -> ();
+  saveToHighlights: (statusId: StatusId) -> (variant {
+                                               err: text;
+                                               ok;
+                                             });
+  searchUserByUsername: (username: text) ->
+   (opt record {
+          profile: UserProfile;
+          userId: UserId;
+        });
+  searchUsers: (searchQuery: text) ->
+   (vec record {
+          profile: UserProfile;
+          userId: UserId;
+        }) query;
+  sendMessage: (conversationId: ConversationId, messageInput:
+   MessageInput) -> (MessageId);
+  transferGold: (toUsername: text, amount: nat) -> ();
+  unblockUser: (targetUserId: UserId) -> ();
+  unfollowChannel: (channelId: ChannelId) -> ();
+  unlikeChannelPost: (postId: ChannelPostId) -> ();
+  unlikeStatus: (statusId: StatusId) -> ();
+  updateCallerAvatar: (avatarUrl: text) -> ();
+  updateCallerBio: (bio: text) -> ();
+  updateCallerDisplayName: (displayName: text) -> ();
+  updateChannel: (channelId: ChannelId, name: text, description: text,
+   avatarUrl: opt text, category: opt text) -> ();
+  updateGroupAvatar: (conversationId: ConversationId, avatarUrl: text) -> ();
+  updateGroupName: (conversationId: ConversationId, newName: text) -> ();
+  updateLastSeen: () -> ();
+}

@@ -8,14 +8,14 @@
 
 import { IDL } from '@icp-sdk/core/candid';
 
-export const _CaffeineStorageCreateCertificateResult = IDL.Record({
+export const _ImmutableObjectStorageCreateCertificateResult = IDL.Record({
   'method' : IDL.Text,
   'blob_hash' : IDL.Text,
 });
-export const _CaffeineStorageRefillInformation = IDL.Record({
+export const _ImmutableObjectStorageRefillInformation = IDL.Record({
   'proposed_top_up_amount' : IDL.Opt(IDL.Nat),
 });
-export const _CaffeineStorageRefillResult = IDL.Record({
+export const _ImmutableObjectStorageRefillResult = IDL.Record({
   'success' : IDL.Opt(IDL.Bool),
   'topped_up_amount' : IDL.Opt(IDL.Nat),
 });
@@ -34,6 +34,7 @@ export const ChannelPostContent = IDL.Record({
 });
 export const ChannelPostId = IDL.Nat;
 export const ConversationId = IDL.Nat;
+export const MessageId = IDL.Nat;
 export const StatusContent = IDL.Record({
   'text' : IDL.Text,
   'mediaUrl' : IDL.Opt(IDL.Text),
@@ -48,7 +49,6 @@ export const UserRole = IDL.Variant({
 export const UserId = IDL.Principal;
 export const ChannelCommentId = IDL.Nat;
 export const CommentId = IDL.Nat;
-export const MessageId = IDL.Nat;
 export const Timestamp = IDL.Int;
 export const UserProfile = IDL.Record({
   'bio' : IDL.Opt(IDL.Text),
@@ -64,6 +64,7 @@ export const Channel = IDL.Record({
   'createdAt' : Timestamp,
   'description' : IDL.Text,
   'avatarUrl' : IDL.Opt(IDL.Text),
+  'category' : IDL.Opt(IDL.Text),
 });
 export const ChannelWithMeta = IDL.Record({
   'ownerProfile' : UserProfile,
@@ -104,12 +105,19 @@ export const MessageReadReceipt = IDL.Record({
   'userId' : UserId,
   'timestamp' : Timestamp,
 });
+export const ReplyToInfo = IDL.Record({
+  'messageId' : MessageId,
+  'preview' : IDL.Text,
+  'senderUsername' : IDL.Text,
+});
 export const Message = IDL.Record({
   'id' : MessageId,
   'content' : MessageContent,
   'readReceipts' : IDL.Vec(MessageReadReceipt),
   'sender' : UserId,
   'timestamp' : Timestamp,
+  'replyTo' : IDL.Opt(ReplyToInfo),
+  'reactions' : IDL.Vec(UserId),
 });
 export const ConversationType = IDL.Variant({
   'group' : IDL.Text,
@@ -174,6 +182,7 @@ export const StatusCommentWithProfile = IDL.Record({
 });
 export const StatusInteractions = IDL.Record({
   'likeCount' : IDL.Nat,
+  'viewCount' : IDL.Nat,
   'comments' : IDL.Vec(StatusCommentWithProfile),
   'likedByMe' : IDL.Bool,
 });
@@ -182,42 +191,46 @@ export const DealerInfo = IDL.Record({
   'balance' : IDL.Nat,
   'avatarUrl' : IDL.Opt(IDL.Text),
 });
-export const MessageInput = IDL.Record({ 'content' : MessageContent });
+export const MessageInput = IDL.Record({
+  'content' : MessageContent,
+  'replyToMessageId' : IDL.Opt(MessageId),
+});
 
 export const idlService = IDL.Service({
-  '_caffeineStorageBlobIsLive' : IDL.Func(
-      [IDL.Vec(IDL.Nat8)],
-      [IDL.Bool],
+  '_immutableObjectStorageBlobsAreLive' : IDL.Func(
+      [IDL.Vec(IDL.Vec(IDL.Nat8))],
+      [IDL.Vec(IDL.Bool)],
       ['query'],
     ),
-  '_caffeineStorageBlobsToDelete' : IDL.Func(
+  '_immutableObjectStorageBlobsToDelete' : IDL.Func(
       [],
       [IDL.Vec(IDL.Vec(IDL.Nat8))],
       ['query'],
     ),
-  '_caffeineStorageConfirmBlobDeletion' : IDL.Func(
+  '_immutableObjectStorageConfirmBlobDeletion' : IDL.Func(
       [IDL.Vec(IDL.Vec(IDL.Nat8))],
       [],
       [],
     ),
-  '_caffeineStorageCreateCertificate' : IDL.Func(
+  '_immutableObjectStorageCreateCertificate' : IDL.Func(
       [IDL.Text],
-      [_CaffeineStorageCreateCertificateResult],
+      [_ImmutableObjectStorageCreateCertificateResult],
       [],
     ),
-  '_caffeineStorageRefillCashier' : IDL.Func(
-      [IDL.Opt(_CaffeineStorageRefillInformation)],
-      [_CaffeineStorageRefillResult],
+  '_immutableObjectStorageRefillCashier' : IDL.Func(
+      [IDL.Opt(_ImmutableObjectStorageRefillInformation)],
+      [_ImmutableObjectStorageRefillResult],
       [],
     ),
-  '_caffeineStorageUpdateGatewayPrincipals' : IDL.Func([], [], []),
-  '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
+  '_immutableObjectStorageUpdateGatewayPrincipals' : IDL.Func([], [], []),
+  '_initializeAccessControl' : IDL.Func([], [], []),
   'addChannelPost' : IDL.Func(
       [ChannelId, ChannelPostContent],
       [ChannelPostId],
       [],
     ),
   'addGroupMember' : IDL.Func([ConversationId, IDL.Text], [], []),
+  'addMessageReaction' : IDL.Func([ConversationId, MessageId], [], []),
   'addStatus' : IDL.Func([StatusContent], [StatusId], []),
   'adminClaimGold' : IDL.Func([IDL.Nat], [], []),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
@@ -229,7 +242,7 @@ export const idlService = IDL.Service({
     ),
   'commentOnStatus' : IDL.Func([StatusId, IDL.Text], [CommentId], []),
   'createChannel' : IDL.Func(
-      [IDL.Text, IDL.Text, IDL.Opt(IDL.Text)],
+      [IDL.Text, IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
       [ChannelId],
       [],
     ),
@@ -242,6 +255,7 @@ export const idlService = IDL.Service({
   'deleteChannel' : IDL.Func([ChannelId], [], []),
   'deleteChannelPost' : IDL.Func([ChannelPostId], [], []),
   'deleteGroupName' : IDL.Func([ConversationId], [], []),
+  'deleteHighlight' : IDL.Func([StatusId], [], []),
   'deleteMessage' : IDL.Func([ConversationId, MessageId], [], []),
   'editChannelPost' : IDL.Func([ChannelPostId, ChannelPostContent], [], []),
   'editMessage' : IDL.Func([ConversationId, MessageId, IDL.Text], [], []),
@@ -251,6 +265,7 @@ export const idlService = IDL.Service({
       [MessageId],
       [],
     ),
+  'getActiveUsersCount' : IDL.Func([], [IDL.Nat], ['query']),
   'getAdminTotalClaimed' : IDL.Func([], [IDL.Nat], ['query']),
   'getAllChannels' : IDL.Func([], [IDL.Vec(ChannelWithMeta)], ['query']),
   'getAllStories' : IDL.Func(
@@ -267,6 +282,11 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'getChannelPosts' : IDL.Func([ChannelId], [IDL.Vec(ChannelPost)], ['query']),
+  'getChannelsByCategory' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(ChannelWithMeta)],
+      ['query'],
+    ),
   'getContactStatuses' : IDL.Func(
       [],
       [IDL.Vec(IDL.Tuple(UserProfile, IDL.Vec(Status)))],
@@ -285,6 +305,12 @@ export const idlService = IDL.Service({
   'getGroupCreators' : IDL.Func(
       [],
       [IDL.Vec(IDL.Tuple(ConversationId, UserId))],
+      ['query'],
+    ),
+  'getHighlights' : IDL.Func([UserId], [IDL.Vec(Status)], ['query']),
+  'getMessageReactions' : IDL.Func(
+      [ConversationId, MessageId],
+      [IDL.Vec(UserId)],
       ['query'],
     ),
   'getMessageReadReceipts' : IDL.Func(
@@ -318,9 +344,19 @@ export const idlService = IDL.Service({
       [StatusInteractions],
       ['query'],
     ),
+  'getStoryViewers' : IDL.Func([StatusId], [IDL.Vec(IDL.Text)], ['query']),
+  'getStoryViewersList' : IDL.Func([StatusId], [IDL.Vec(IDL.Text)], ['query']),
+  'getTotalChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
+  'getTotalGoldVolume' : IDL.Func([], [IDL.Float64], ['query']),
+  'getTotalMessagesCount' : IDL.Func([], [IDL.Nat], ['query']),
+  'getTotalStoriesPosted' : IDL.Func([], [IDL.Nat], ['query']),
+  'getTotalUsers' : IDL.Func([], [IDL.Nat], ['query']),
   'getUnreadCount' : IDL.Func([ConversationId], [IDL.Nat], ['query']),
   'getUserByPrincipal' : IDL.Func([UserId], [IDL.Opt(UserProfile)], ['query']),
+  'getUserChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
+  'getUserMessageCount' : IDL.Func([], [IDL.Nat], ['query']),
   'getUserProfile' : IDL.Func([UserId], [IDL.Opt(UserProfile)], ['query']),
+  'getUserStoriesPosted' : IDL.Func([], [IDL.Nat], ['query']),
   'getUsersWithGoldAbove' : IDL.Func(
       [IDL.Nat],
       [IDL.Vec(DealerInfo)],
@@ -328,6 +364,7 @@ export const idlService = IDL.Service({
     ),
   'isBlockedBy' : IDL.Func([UserId], [IDL.Bool], ['query']),
   'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+  'isHighlighted' : IDL.Func([StatusId], [IDL.Bool], ['query']),
   'isUserOnline' : IDL.Func([UserId], [IDL.Bool], ['query']),
   'leaveConversation' : IDL.Func([ConversationId], [], []),
   'likeChannelPost' : IDL.Func([ChannelPostId], [], []),
@@ -336,10 +373,22 @@ export const idlService = IDL.Service({
   'markAsRead' : IDL.Func([ConversationId], [], []),
   'markMessagesAsRead' : IDL.Func([ConversationId], [], []),
   'markNotificationsRead' : IDL.Func([], [], []),
+  'recordStoryView' : IDL.Func([StatusId], [], []),
+  'removeFromHighlights' : IDL.Func(
+      [StatusId],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'removeGroupMember' : IDL.Func([ConversationId, UserId], [], []),
+  'removeMessageReaction' : IDL.Func([ConversationId, MessageId], [], []),
   'requestBuyGold' : IDL.Func([IDL.Nat], [], []),
   'requestSellGold' : IDL.Func([IDL.Nat], [], []),
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'saveToHighlights' : IDL.Func(
+      [StatusId],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'searchUserByUsername' : IDL.Func(
       [IDL.Text],
       [IDL.Opt(IDL.Record({ 'userId' : UserId, 'profile' : UserProfile }))],
@@ -360,7 +409,7 @@ export const idlService = IDL.Service({
   'updateCallerBio' : IDL.Func([IDL.Text], [], []),
   'updateCallerDisplayName' : IDL.Func([IDL.Text], [], []),
   'updateChannel' : IDL.Func(
-      [ChannelId, IDL.Text, IDL.Text, IDL.Opt(IDL.Text)],
+      [ChannelId, IDL.Text, IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
       [],
       [],
     ),
@@ -372,14 +421,14 @@ export const idlService = IDL.Service({
 export const idlInitArgs = [];
 
 export const idlFactory = ({ IDL }) => {
-  const _CaffeineStorageCreateCertificateResult = IDL.Record({
+  const _ImmutableObjectStorageCreateCertificateResult = IDL.Record({
     'method' : IDL.Text,
     'blob_hash' : IDL.Text,
   });
-  const _CaffeineStorageRefillInformation = IDL.Record({
+  const _ImmutableObjectStorageRefillInformation = IDL.Record({
     'proposed_top_up_amount' : IDL.Opt(IDL.Nat),
   });
-  const _CaffeineStorageRefillResult = IDL.Record({
+  const _ImmutableObjectStorageRefillResult = IDL.Record({
     'success' : IDL.Opt(IDL.Bool),
     'topped_up_amount' : IDL.Opt(IDL.Nat),
   });
@@ -398,6 +447,7 @@ export const idlFactory = ({ IDL }) => {
   });
   const ChannelPostId = IDL.Nat;
   const ConversationId = IDL.Nat;
+  const MessageId = IDL.Nat;
   const StatusContent = IDL.Record({
     'text' : IDL.Text,
     'mediaUrl' : IDL.Opt(IDL.Text),
@@ -412,7 +462,6 @@ export const idlFactory = ({ IDL }) => {
   const UserId = IDL.Principal;
   const ChannelCommentId = IDL.Nat;
   const CommentId = IDL.Nat;
-  const MessageId = IDL.Nat;
   const Timestamp = IDL.Int;
   const UserProfile = IDL.Record({
     'bio' : IDL.Opt(IDL.Text),
@@ -428,6 +477,7 @@ export const idlFactory = ({ IDL }) => {
     'createdAt' : Timestamp,
     'description' : IDL.Text,
     'avatarUrl' : IDL.Opt(IDL.Text),
+    'category' : IDL.Opt(IDL.Text),
   });
   const ChannelWithMeta = IDL.Record({
     'ownerProfile' : UserProfile,
@@ -468,12 +518,19 @@ export const idlFactory = ({ IDL }) => {
     'userId' : UserId,
     'timestamp' : Timestamp,
   });
+  const ReplyToInfo = IDL.Record({
+    'messageId' : MessageId,
+    'preview' : IDL.Text,
+    'senderUsername' : IDL.Text,
+  });
   const Message = IDL.Record({
     'id' : MessageId,
     'content' : MessageContent,
     'readReceipts' : IDL.Vec(MessageReadReceipt),
     'sender' : UserId,
     'timestamp' : Timestamp,
+    'replyTo' : IDL.Opt(ReplyToInfo),
+    'reactions' : IDL.Vec(UserId),
   });
   const ConversationType = IDL.Variant({
     'group' : IDL.Text,
@@ -544,6 +601,7 @@ export const idlFactory = ({ IDL }) => {
   });
   const StatusInteractions = IDL.Record({
     'likeCount' : IDL.Nat,
+    'viewCount' : IDL.Nat,
     'comments' : IDL.Vec(StatusCommentWithProfile),
     'likedByMe' : IDL.Bool,
   });
@@ -552,42 +610,46 @@ export const idlFactory = ({ IDL }) => {
     'balance' : IDL.Nat,
     'avatarUrl' : IDL.Opt(IDL.Text),
   });
-  const MessageInput = IDL.Record({ 'content' : MessageContent });
+  const MessageInput = IDL.Record({
+    'content' : MessageContent,
+    'replyToMessageId' : IDL.Opt(MessageId),
+  });
   
   return IDL.Service({
-    '_caffeineStorageBlobIsLive' : IDL.Func(
-        [IDL.Vec(IDL.Nat8)],
-        [IDL.Bool],
+    '_immutableObjectStorageBlobsAreLive' : IDL.Func(
+        [IDL.Vec(IDL.Vec(IDL.Nat8))],
+        [IDL.Vec(IDL.Bool)],
         ['query'],
       ),
-    '_caffeineStorageBlobsToDelete' : IDL.Func(
+    '_immutableObjectStorageBlobsToDelete' : IDL.Func(
         [],
         [IDL.Vec(IDL.Vec(IDL.Nat8))],
         ['query'],
       ),
-    '_caffeineStorageConfirmBlobDeletion' : IDL.Func(
+    '_immutableObjectStorageConfirmBlobDeletion' : IDL.Func(
         [IDL.Vec(IDL.Vec(IDL.Nat8))],
         [],
         [],
       ),
-    '_caffeineStorageCreateCertificate' : IDL.Func(
+    '_immutableObjectStorageCreateCertificate' : IDL.Func(
         [IDL.Text],
-        [_CaffeineStorageCreateCertificateResult],
+        [_ImmutableObjectStorageCreateCertificateResult],
         [],
       ),
-    '_caffeineStorageRefillCashier' : IDL.Func(
-        [IDL.Opt(_CaffeineStorageRefillInformation)],
-        [_CaffeineStorageRefillResult],
+    '_immutableObjectStorageRefillCashier' : IDL.Func(
+        [IDL.Opt(_ImmutableObjectStorageRefillInformation)],
+        [_ImmutableObjectStorageRefillResult],
         [],
       ),
-    '_caffeineStorageUpdateGatewayPrincipals' : IDL.Func([], [], []),
-    '_initializeAccessControlWithSecret' : IDL.Func([IDL.Text], [], []),
+    '_immutableObjectStorageUpdateGatewayPrincipals' : IDL.Func([], [], []),
+    '_initializeAccessControl' : IDL.Func([], [], []),
     'addChannelPost' : IDL.Func(
         [ChannelId, ChannelPostContent],
         [ChannelPostId],
         [],
       ),
     'addGroupMember' : IDL.Func([ConversationId, IDL.Text], [], []),
+    'addMessageReaction' : IDL.Func([ConversationId, MessageId], [], []),
     'addStatus' : IDL.Func([StatusContent], [StatusId], []),
     'adminClaimGold' : IDL.Func([IDL.Nat], [], []),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
@@ -599,7 +661,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'commentOnStatus' : IDL.Func([StatusId, IDL.Text], [CommentId], []),
     'createChannel' : IDL.Func(
-        [IDL.Text, IDL.Text, IDL.Opt(IDL.Text)],
+        [IDL.Text, IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
         [ChannelId],
         [],
       ),
@@ -612,6 +674,7 @@ export const idlFactory = ({ IDL }) => {
     'deleteChannel' : IDL.Func([ChannelId], [], []),
     'deleteChannelPost' : IDL.Func([ChannelPostId], [], []),
     'deleteGroupName' : IDL.Func([ConversationId], [], []),
+    'deleteHighlight' : IDL.Func([StatusId], [], []),
     'deleteMessage' : IDL.Func([ConversationId, MessageId], [], []),
     'editChannelPost' : IDL.Func([ChannelPostId, ChannelPostContent], [], []),
     'editMessage' : IDL.Func([ConversationId, MessageId, IDL.Text], [], []),
@@ -621,6 +684,7 @@ export const idlFactory = ({ IDL }) => {
         [MessageId],
         [],
       ),
+    'getActiveUsersCount' : IDL.Func([], [IDL.Nat], ['query']),
     'getAdminTotalClaimed' : IDL.Func([], [IDL.Nat], ['query']),
     'getAllChannels' : IDL.Func([], [IDL.Vec(ChannelWithMeta)], ['query']),
     'getAllStories' : IDL.Func(
@@ -641,6 +705,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(ChannelPost)],
         ['query'],
       ),
+    'getChannelsByCategory' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(ChannelWithMeta)],
+        ['query'],
+      ),
     'getContactStatuses' : IDL.Func(
         [],
         [IDL.Vec(IDL.Tuple(UserProfile, IDL.Vec(Status)))],
@@ -659,6 +728,12 @@ export const idlFactory = ({ IDL }) => {
     'getGroupCreators' : IDL.Func(
         [],
         [IDL.Vec(IDL.Tuple(ConversationId, UserId))],
+        ['query'],
+      ),
+    'getHighlights' : IDL.Func([UserId], [IDL.Vec(Status)], ['query']),
+    'getMessageReactions' : IDL.Func(
+        [ConversationId, MessageId],
+        [IDL.Vec(UserId)],
         ['query'],
       ),
     'getMessageReadReceipts' : IDL.Func(
@@ -696,13 +771,27 @@ export const idlFactory = ({ IDL }) => {
         [StatusInteractions],
         ['query'],
       ),
+    'getStoryViewers' : IDL.Func([StatusId], [IDL.Vec(IDL.Text)], ['query']),
+    'getStoryViewersList' : IDL.Func(
+        [StatusId],
+        [IDL.Vec(IDL.Text)],
+        ['query'],
+      ),
+    'getTotalChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
+    'getTotalGoldVolume' : IDL.Func([], [IDL.Float64], ['query']),
+    'getTotalMessagesCount' : IDL.Func([], [IDL.Nat], ['query']),
+    'getTotalStoriesPosted' : IDL.Func([], [IDL.Nat], ['query']),
+    'getTotalUsers' : IDL.Func([], [IDL.Nat], ['query']),
     'getUnreadCount' : IDL.Func([ConversationId], [IDL.Nat], ['query']),
     'getUserByPrincipal' : IDL.Func(
         [UserId],
         [IDL.Opt(UserProfile)],
         ['query'],
       ),
+    'getUserChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
+    'getUserMessageCount' : IDL.Func([], [IDL.Nat], ['query']),
     'getUserProfile' : IDL.Func([UserId], [IDL.Opt(UserProfile)], ['query']),
+    'getUserStoriesPosted' : IDL.Func([], [IDL.Nat], ['query']),
     'getUsersWithGoldAbove' : IDL.Func(
         [IDL.Nat],
         [IDL.Vec(DealerInfo)],
@@ -710,6 +799,7 @@ export const idlFactory = ({ IDL }) => {
       ),
     'isBlockedBy' : IDL.Func([UserId], [IDL.Bool], ['query']),
     'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
+    'isHighlighted' : IDL.Func([StatusId], [IDL.Bool], ['query']),
     'isUserOnline' : IDL.Func([UserId], [IDL.Bool], ['query']),
     'leaveConversation' : IDL.Func([ConversationId], [], []),
     'likeChannelPost' : IDL.Func([ChannelPostId], [], []),
@@ -718,10 +808,22 @@ export const idlFactory = ({ IDL }) => {
     'markAsRead' : IDL.Func([ConversationId], [], []),
     'markMessagesAsRead' : IDL.Func([ConversationId], [], []),
     'markNotificationsRead' : IDL.Func([], [], []),
+    'recordStoryView' : IDL.Func([StatusId], [], []),
+    'removeFromHighlights' : IDL.Func(
+        [StatusId],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'removeGroupMember' : IDL.Func([ConversationId, UserId], [], []),
+    'removeMessageReaction' : IDL.Func([ConversationId, MessageId], [], []),
     'requestBuyGold' : IDL.Func([IDL.Nat], [], []),
     'requestSellGold' : IDL.Func([IDL.Nat], [], []),
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'saveToHighlights' : IDL.Func(
+        [StatusId],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'searchUserByUsername' : IDL.Func(
         [IDL.Text],
         [IDL.Opt(IDL.Record({ 'userId' : UserId, 'profile' : UserProfile }))],
@@ -742,7 +844,7 @@ export const idlFactory = ({ IDL }) => {
     'updateCallerBio' : IDL.Func([IDL.Text], [], []),
     'updateCallerDisplayName' : IDL.Func([IDL.Text], [], []),
     'updateChannel' : IDL.Func(
-        [ChannelId, IDL.Text, IDL.Text, IDL.Opt(IDL.Text)],
+        [ChannelId, IDL.Text, IDL.Text, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
         [],
         [],
       ),

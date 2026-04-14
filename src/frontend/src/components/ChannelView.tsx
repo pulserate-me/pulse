@@ -29,8 +29,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft,
+  Camera,
+  ChevronDown,
   Edit,
   Image,
+  Link,
   Loader2,
   Mic,
   MoreVertical,
@@ -38,9 +41,9 @@ import {
   Trash2,
   Users,
   Video,
+  X,
 } from "lucide-react";
-import { Camera } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useMediaUpload } from "../hooks/useMediaUpload";
 import {
@@ -67,6 +70,31 @@ function getInitials(name: string) {
     .slice(0, 2);
 }
 
+function detectEmbedPlatform(url: string): "youtube" | "x" | "tiktok" | null {
+  if (
+    url.includes("youtube.com/watch") ||
+    url.includes("youtu.be/") ||
+    url.includes("youtube.com/shorts/")
+  )
+    return "youtube";
+  if (url.includes("twitter.com/") || url.includes("x.com/")) return "x";
+  if (url.includes("tiktok.com/") || url.includes("vt.tiktok.com"))
+    return "tiktok";
+  return null;
+}
+
+const CHANNEL_CATEGORIES = [
+  "Music",
+  "Finance",
+  "Sports",
+  "News",
+  "Entertainment",
+  "Technology",
+  "Health",
+  "Education",
+  "Other",
+] as const;
+
 function EditChannelModal({
   open,
   onOpenChange,
@@ -74,6 +102,7 @@ function EditChannelModal({
   initialName,
   initialDescription,
   initialAvatarUrl,
+  initialCategory,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -81,9 +110,11 @@ function EditChannelModal({
   initialName: string;
   initialDescription: string;
   initialAvatarUrl?: string;
+  initialCategory?: string;
 }) {
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription);
+  const [category, setCategory] = useState(initialCategory ?? "");
   const [avatarPreview, setAvatarPreview] = useState<string | null>(
     initialAvatarUrl ?? null,
   );
@@ -106,6 +137,7 @@ function EditChannelModal({
         name: name.trim(),
         description: description.trim(),
         avatarUrl,
+        category: category || undefined,
       });
       toast.success("Channel updated");
       onOpenChange(false);
@@ -190,6 +222,41 @@ function EditChannelModal({
               maxLength={300}
             />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-sm text-muted-foreground">Category</Label>
+            <div className="relative">
+              <select
+                data-ocid="channel.edit.category_select"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                disabled={isBusy}
+                className="w-full h-9 rounded-md px-3 pr-8 text-sm appearance-none cursor-pointer focus:outline-none focus:ring-1"
+                style={{
+                  background: "oklch(0.16 0.015 55)",
+                  border: "1px solid oklch(0.3 0.01 55)",
+                  color: category ? "oklch(0.9 0.01 55)" : "oklch(0.5 0.02 55)",
+                }}
+              >
+                <option value="">No category</option>
+                {CHANNEL_CATEGORIES.map((cat) => (
+                  <option
+                    key={cat}
+                    value={cat}
+                    style={{
+                      background: "oklch(0.16 0.015 55)",
+                      color: "oklch(0.9 0.01 55)",
+                    }}
+                  >
+                    {cat}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none"
+                style={{ color: "oklch(0.5 0.02 55)" }}
+              />
+            </div>
+          </div>
         </div>
         <div className="flex justify-end gap-2">
           <Button
@@ -248,14 +315,132 @@ export default function ChannelView({
     useDeleteChannel();
   const imageRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
-  const audioRef = useRef<HTMLInputElement>(null);
+
+  // Voice recording state
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+
+  // Embed URL state
+  const [showEmbedInput, setShowEmbedInput] = useState(false);
+  const [embedUrl, setEmbedUrl] = useState("");
 
   // Mark channel as viewed when opened so unread badge clears
   useEffect(() => {
     markChannelAsViewed(channelId.toString());
   }, [channelId]);
 
+  // Cleanup recording on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (mediaRecorderRef.current?.state === "recording") {
+        mediaRecorderRef.current.stop();
+        for (const t of mediaRecorderRef.current.stream.getTracks()) {
+          t.stop();
+        }
+      }
+    };
+  }, []);
+
   const isBusy = posting || isUploading;
+
+  const detectedPlatform = embedUrl.trim()
+    ? detectEmbedPlatform(embedUrl.trim())
+    : null;
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "audio/ogg";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+    } catch {
+      toast.error("Microphone access denied");
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+      for (const t of mediaRecorderRef.current.stream.getTracks()) {
+        t.stop();
+      }
+    }
+    setIsRecording(false);
+    setRecordingSeconds(0);
+  }, []);
+
+  const cancelRecording = useCallback(() => {
+    stopRecording();
+    recordingChunksRef.current = [];
+  }, [stopRecording]);
+
+  const sendRecording = useCallback(async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+
+    // Stop and collect remaining data
+    await new Promise<void>((resolve) => {
+      recorder.onstop = () => resolve();
+      if (recorder.state === "recording") {
+        recorder.stop();
+        for (const t of recorder.stream.getTracks()) {
+          t.stop();
+        }
+      } else {
+        resolve();
+      }
+    });
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingSeconds(0);
+
+    const mimeType = recorder.mimeType || "audio/webm";
+    const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+    recordingChunksRef.current = [];
+    const ext = mimeType.includes("ogg") ? "ogg" : "webm";
+    const audioFile = new File([blob], `audio_recording.${ext}`, {
+      type: mimeType,
+    });
+
+    try {
+      const result = await uploadMedia(audioFile);
+      await addPost({
+        text: postText.trim(),
+        mediaUrl: result.url,
+        mediaType: result.mediaType,
+      });
+      setPostText("");
+      setPendingMedia(null);
+      setPostsPage(1);
+      toast.success("Post published!");
+    } catch {
+      toast.error("Failed to publish post");
+    }
+  }, [addPost, uploadMedia, postText]);
 
   if (channelLoading) {
     return (
@@ -302,15 +487,26 @@ export default function ChannelView({
   };
 
   const handlePost = async () => {
-    if (!postText.trim() && !pendingMedia) return;
+    const hasEmbed = embedUrl.trim() && detectedPlatform;
+    if (!postText.trim() && !pendingMedia && !hasEmbed) return;
     try {
       let mediaUrl: string | undefined;
       let mediaType: any;
-      if (pendingMedia) {
+
+      if (hasEmbed) {
+        mediaUrl = embedUrl.trim();
+        const platformMap = {
+          youtube: "embedYouTube",
+          x: "embedX",
+          tiktok: "embedTikTok",
+        };
+        mediaType = { other: platformMap[detectedPlatform!] };
+      } else if (pendingMedia) {
         const result = await uploadMedia(pendingMedia);
         mediaUrl = result.url;
         mediaType = result.mediaType;
       }
+
       await addPost({
         text: postText.trim(),
         mediaUrl,
@@ -318,11 +514,19 @@ export default function ChannelView({
       });
       setPostText("");
       setPendingMedia(null);
+      setEmbedUrl("");
+      setShowEmbedInput(false);
       setPostsPage(1);
       toast.success("Post published!");
     } catch {
       toast.error("Failed to publish post");
     }
+  };
+
+  const formatRecordingTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
   const sortedPosts = [...posts].sort(
@@ -502,9 +706,11 @@ export default function ChannelView({
             placeholder="Share something with your followers..."
             value={postText}
             onChange={(e) => setPostText(e.target.value)}
-            className="bg-input border-border resize-none h-16 text-sm"
-            disabled={isBusy}
+            className="bg-input border-border resize-none min-h-[4rem] text-sm"
+            disabled={isBusy || isRecording}
           />
+
+          {/* Pending media file label */}
           {pendingMedia && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="truncate max-w-48">{pendingMedia.name}</span>
@@ -517,81 +723,192 @@ export default function ChannelView({
               </button>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              data-ocid="channel.post.upload_button"
-              onClick={() => imageRef.current?.click()}
-              disabled={isBusy}
-              className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-              title="Attach image"
-            >
-              <Image className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => videoRef.current?.click()}
-              disabled={isBusy}
-              className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-              title="Attach video"
-            >
-              <Video className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => audioRef.current?.click()}
-              disabled={isBusy}
-              className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
-              title="Attach audio"
-            >
-              <Mic className="h-4 w-4" />
-            </button>
 
-            <input
-              ref={imageRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => setPendingMedia(e.target.files?.[0] ?? null)}
-            />
-            <input
-              ref={videoRef}
-              type="file"
-              accept="video/*"
-              className="hidden"
-              onChange={(e) => setPendingMedia(e.target.files?.[0] ?? null)}
-            />
-            <input
-              ref={audioRef}
-              type="file"
-              accept="audio/*"
-              className="hidden"
-              onChange={(e) => setPendingMedia(e.target.files?.[0] ?? null)}
-            />
-
-            <div className="flex-1" />
-            <Button
-              data-ocid="channel.post.submit_button"
-              size="sm"
-              onClick={handlePost}
-              disabled={isBusy || (!postText.trim() && !pendingMedia)}
-              style={{
-                background:
-                  "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
-                color: "oklch(0.08 0.004 55)",
-              }}
-              className="rounded-xl text-xs px-4"
-            >
-              {isBusy ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <>
-                  <Send className="h-3 w-3 mr-1.5" />
-                  Post
-                </>
+          {/* Embed URL input */}
+          {showEmbedInput && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Input
+                  data-ocid="channel.post.input"
+                  placeholder="Paste YouTube, X, or TikTok URL..."
+                  value={embedUrl}
+                  onChange={(e) => setEmbedUrl(e.target.value)}
+                  className="flex-1 h-8 text-xs bg-input border-border"
+                  disabled={isBusy}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmbedUrl("");
+                    setShowEmbedInput(false);
+                  }}
+                  className="p-1 rounded hover:bg-muted text-muted-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {detectedPlatform && (
+                <span
+                  className="text-xs font-semibold px-1"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                >
+                  {detectedPlatform === "youtube" && "▶ YouTube detected"}
+                  {detectedPlatform === "x" && "𝕏 X / Twitter detected"}
+                  {detectedPlatform === "tiktok" && "TT TikTok detected"}
+                </span>
               )}
-            </Button>
-          </div>
+            </div>
+          )}
+
+          {/* Recording UI */}
+          {isRecording ? (
+            <div className="flex items-center gap-3 py-1">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span
+                    className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                    style={{ background: "oklch(0.55 0.22 25)" }}
+                  />
+                  <span
+                    className="relative inline-flex rounded-full h-2.5 w-2.5"
+                    style={{ background: "oklch(0.6 0.25 25)" }}
+                  />
+                </span>
+                <Mic
+                  className="h-4 w-4"
+                  style={{ color: "oklch(0.6 0.25 25)" }}
+                />
+                <span
+                  className="text-sm font-mono font-semibold"
+                  style={{ color: "oklch(0.6 0.25 25)" }}
+                >
+                  {formatRecordingTime(recordingSeconds)}
+                </span>
+              </div>
+              <div className="flex-1" />
+              <button
+                type="button"
+                onClick={cancelRecording}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-muted transition-colors text-muted-foreground"
+              >
+                Cancel
+              </button>
+              <Button
+                size="sm"
+                onClick={sendRecording}
+                disabled={isBusy}
+                style={{
+                  background:
+                    "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                  color: "oklch(0.08 0.004 55)",
+                }}
+                className="rounded-xl text-xs px-4"
+                data-ocid="channel.post.submit_button"
+              >
+                {isBusy ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <>
+                    <Send className="h-3 w-3 mr-1.5" />
+                    Send
+                  </>
+                )}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              {/* Image upload */}
+              <button
+                type="button"
+                data-ocid="channel.post.upload_button"
+                onClick={() => imageRef.current?.click()}
+                disabled={isBusy}
+                className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                title="Attach image"
+              >
+                <Image className="h-4 w-4" />
+              </button>
+
+              {/* Video upload */}
+              <button
+                type="button"
+                onClick={() => videoRef.current?.click()}
+                disabled={isBusy}
+                className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                title="Attach video"
+              >
+                <Video className="h-4 w-4" />
+              </button>
+
+              {/* Voice recording */}
+              <button
+                type="button"
+                onClick={startRecording}
+                disabled={isBusy}
+                className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                title="Record audio"
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+
+              {/* Embed URL toggle */}
+              <button
+                type="button"
+                onClick={() => setShowEmbedInput((v) => !v)}
+                disabled={isBusy}
+                className="p-1.5 rounded-lg hover:bg-muted transition-colors hover:text-foreground"
+                style={{
+                  color: showEmbedInput ? "oklch(0.82 0.15 72)" : undefined,
+                }}
+                title="Embed YouTube / X / TikTok"
+              >
+                <Link className="h-4 w-4" />
+              </button>
+
+              <input
+                ref={imageRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => setPendingMedia(e.target.files?.[0] ?? null)}
+              />
+              <input
+                ref={videoRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={(e) => setPendingMedia(e.target.files?.[0] ?? null)}
+              />
+
+              <div className="flex-1" />
+              <Button
+                data-ocid="channel.post.submit_button"
+                size="sm"
+                onClick={handlePost}
+                disabled={
+                  isBusy ||
+                  (!postText.trim() &&
+                    !pendingMedia &&
+                    !(embedUrl.trim() && detectedPlatform))
+                }
+                style={{
+                  background:
+                    "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                  color: "oklch(0.08 0.004 55)",
+                }}
+                className="rounded-xl text-xs px-4"
+              >
+                {isBusy ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <>
+                    <Send className="h-3 w-3 mr-1.5" />
+                    Post
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -670,6 +987,7 @@ export default function ChannelView({
           initialName={channel.name}
           initialDescription={channel.description}
           initialAvatarUrl={channel.avatarUrl}
+          initialCategory={channel.category}
         />
       )}
     </div>

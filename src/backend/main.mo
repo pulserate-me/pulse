@@ -6,22 +6,27 @@ import Time "mo:core/Time";
 import Text "mo:core/Text";
 import Nat "mo:core/Nat";
 import Int "mo:core/Int";
+import Float "mo:core/Float";
 import Order "mo:core/Order";
 import Set "mo:core/Set";
 import Principal "mo:core/Principal";
 import Iter "mo:core/Iter";
 import Runtime "mo:core/Runtime";
-import MixinAuthorization "authorization/MixinAuthorization";
-import AccessControl "authorization/access-control";
-import MixinStorage "blob-storage/Mixin";
-import _Storage "blob-storage/Storage";
+
+import MixinAuthorization "mo:caffeineai-authorization/MixinAuthorization";
+import AccessControl "mo:caffeineai-authorization/access-control";
+import MixinObjectStorage "mo:caffeineai-object-storage/Mixin";
+import _Storage "mo:caffeineai-object-storage/Storage";
+
+
+
 
 
 
 actor {
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
-  include MixinStorage();
+  include MixinObjectStorage();
 
   // Type Definitions
   type UserId = Principal;
@@ -67,12 +72,20 @@ actor {
     timestamp : Timestamp;
   };
 
+  public type ReplyToInfo = {
+    messageId : MessageId;
+    senderUsername : Text;
+    preview : Text;
+  };
+
   public type Message = {
     id : MessageId;
     sender : UserId;
     content : MessageContent;
     timestamp : Timestamp;
     readReceipts : [MessageReadReceipt];
+    replyTo : ?ReplyToInfo;
+    reactions : [UserId];
   };
 
   public type Conversation = {
@@ -115,6 +128,7 @@ actor {
     likeCount : Nat;
     likedByMe : Bool;
     comments : [StatusCommentWithProfile];
+    viewCount : Nat;
   };
 
   // Channel Types
@@ -125,6 +139,7 @@ actor {
     avatarUrl : ?Text;
     owner : UserId;
     createdAt : Timestamp;
+    category : ?Text;
   };
 
   public type ChannelPostContent = {
@@ -208,6 +223,7 @@ actor {
   // Message DTOs
   public type MessageInput = {
     content : MessageContent;
+    replyToMessageId : ?MessageId;
   };
 
   // State Management
@@ -245,8 +261,17 @@ actor {
   let goldMaxClaim : Nat = 999_999_900;
   let adminUsername : Text = "pulse";
 
-  // Stable notifications store
+  // Notifications store
   let notifications = Map.empty<UserId, List.List<AppNotification>>();
+
+  // Message reactions: messageId -> set of users who reacted
+  let messageReactions = Map.empty<MessageId, Set.Set<UserId>>();
+
+  // Highlights: userId -> list of statusIds saved as permanent highlights
+  let highlights = Map.empty<UserId, List.List<StatusId>>();
+
+  // Story views: statusId -> set of principals who have viewed (unique per user)
+  let storyViews = Map.empty<StatusId, Set.Set<UserId>>();
 
   // Block System State
   let blockedUsers = Map.empty<UserId, Set.Set<UserId>>();
@@ -334,8 +359,8 @@ actor {
       Runtime.trap("You cannot block yourself");
     };
 
-    let callerProfile = getUserProfileOrTrap(caller);
-    let targetProfile = getUserProfileOrTrap(targetUserId);
+    let _callerProfile = getUserProfileOrTrap(caller);
+    let _targetProfile = getUserProfileOrTrap(targetUserId);
 
     let blocked = switch (blockedUsers.get(caller)) {
       case (null) {
@@ -355,8 +380,8 @@ actor {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can unblock other users");
     };
-    let callerProfile = getUserProfileOrTrap(caller);
-    let targetProfile = getUserProfileOrTrap(targetUserId);
+    let _callerProfile = getUserProfileOrTrap(caller);
+    let _targetProfile = getUserProfileOrTrap(targetUserId);
 
     switch (blockedUsers.get(caller)) {
       case (null) {
@@ -669,12 +694,36 @@ actor {
       case (#group(_)) { () };
     };
 
+    let replyToInfo : ?ReplyToInfo = switch (messageInput.replyToMessageId) {
+      case (null) { null };
+      case (?origMsgId) {
+        let conv = getConversationOrTrap(conversationId);
+        switch (conv.messages.find(func(m) { m.id == origMsgId })) {
+          case (null) { null };
+          case (?origMsg) {
+            let senderUsername = switch (users.get(origMsg.sender)) {
+              case (null) { "unknown" };
+              case (?p) { p.username };
+            };
+            let preview = if (origMsg.content.text.size() > 60) {
+              Text.fromIter(origMsg.content.text.chars().take(60)) # "..."
+            } else {
+              origMsg.content.text
+            };
+            ?{ messageId = origMsgId; senderUsername; preview };
+          };
+        };
+      };
+    };
+
     let message = {
       id = nextMessageId;
       sender = caller;
       content = messageInput.content;
       timestamp = Time.now();
       readReceipts = [{ userId = caller; timestamp = Time.now() }];
+      replyTo = replyToInfo;
+      reactions = [];
     };
 
     let updatedMessages = conversation.messages.concat([message]);
@@ -864,6 +913,82 @@ actor {
     )) {
       case (null) { null };
       case (?msg) { ?msg.readReceipts };
+    };
+  };
+
+  // ============================================================
+  // Message Reaction Endpoints
+  // ============================================================
+
+  public shared ({ caller }) func addMessageReaction(conversationId : ConversationId, messageId : MessageId) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can react to messages");
+    };
+    if (not isConversationMember(conversationId, caller)) {
+      Runtime.trap("Unauthorized: You are not a member of this conversation");
+    };
+    let conversation = getConversationOrTrap(conversationId);
+    // Verify message exists in this conversation
+    switch (conversation.messages.find(func(m) { m.id == messageId })) {
+      case (null) { Runtime.trap("Message not found") };
+      case (?_) {};
+    };
+    switch (messageReactions.get(messageId)) {
+      case (null) {
+        let s = Set.empty<UserId>();
+        s.add(caller);
+        messageReactions.add(messageId, s);
+      };
+      case (?s) { s.add(caller) };
+    };
+    // Update the reactions field on the stored message so it is reflected in getMessages
+    let updatedMessages = conversation.messages.map(func(msg) {
+      if (msg.id == messageId) {
+        let reactors = switch (messageReactions.get(messageId)) {
+          case (null) { [] };
+          case (?s) { s.toArray() };
+        };
+        { msg with reactions = reactors }
+      } else { msg }
+    });
+    saveConversation({ conversation with messages = updatedMessages });
+  };
+
+  public shared ({ caller }) func removeMessageReaction(conversationId : ConversationId, messageId : MessageId) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can remove reactions");
+    };
+    if (not isConversationMember(conversationId, caller)) {
+      Runtime.trap("Unauthorized: You are not a member of this conversation");
+    };
+    let conversation = getConversationOrTrap(conversationId);
+    switch (messageReactions.get(messageId)) {
+      case (null) { () };
+      case (?s) { s.remove(caller) };
+    };
+    // Update the reactions field on the stored message
+    let updatedMessages = conversation.messages.map(func(msg) {
+      if (msg.id == messageId) {
+        let reactors = switch (messageReactions.get(messageId)) {
+          case (null) { [] };
+          case (?s) { s.toArray() };
+        };
+        { msg with reactions = reactors }
+      } else { msg }
+    });
+    saveConversation({ conversation with messages = updatedMessages });
+  };
+
+  public query ({ caller }) func getMessageReactions(conversationId : ConversationId, messageId : MessageId) : async [UserId] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can view reactions");
+    };
+    if (not isConversationMember(conversationId, caller)) {
+      Runtime.trap("Unauthorized: You are not a member of this conversation");
+    };
+    switch (messageReactions.get(messageId)) {
+      case (null) { [] };
+      case (?s) { s.toArray() };
     };
   };
 
@@ -1176,6 +1301,10 @@ actor {
       case (null) { false };
       case (?likers) { likers.contains(caller) };
     };
+    let viewCount = switch (storyViews.get(statusId)) {
+      case (null) { 0 };
+      case (?viewers) { viewers.size() };
+    };
     let comments = statusComments.values().toArray()
       .filter(func(c) { c.statusId == statusId })
       .map(func(c) {
@@ -1185,14 +1314,14 @@ actor {
         };
         { id = c.id; author = authorProfile; text = c.text; timestamp = c.timestamp };
       });
-    { likeCount; likedByMe; comments };
+    { likeCount; likedByMe; comments; viewCount };
   };
 
   // ============================================================
   // Channel Endpoints
   // ============================================================
 
-  public shared ({ caller }) func createChannel(name : Text, description : Text, avatarUrl : ?Text) : async ChannelId {
+  public shared ({ caller }) func createChannel(name : Text, description : Text, avatarUrl : ?Text, category : ?Text) : async ChannelId {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can create channels");
     };
@@ -1205,12 +1334,13 @@ actor {
       avatarUrl;
       owner = caller;
       createdAt = Time.now();
+      category;
     };
     channels.add(channelId, channel);
     channelId;
   };
 
-  public shared ({ caller }) func updateChannel(channelId : ChannelId, name : Text, description : Text, avatarUrl : ?Text) : async () {
+  public shared ({ caller }) func updateChannel(channelId : ChannelId, name : Text, description : Text, avatarUrl : ?Text, category : ?Text) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Runtime.trap("Unauthorized: Only users can update channels");
     };
@@ -1218,7 +1348,7 @@ actor {
       case (null) { Runtime.trap("Channel not found") };
       case (?ch) {
         if (ch.owner != caller) { Runtime.trap("Only the channel owner can update it") };
-        channels.add(channelId, { ch with name; description; avatarUrl });
+        channels.add(channelId, { ch with name; description; avatarUrl; category });
       };
     };
   };
@@ -1228,6 +1358,32 @@ actor {
       Runtime.trap("Unauthorized: Only users can view channels");
     };
     channels.values().toArray().map(func(ch) {
+      let followerCount = switch (channelFollowers.get(ch.id)) {
+        case (null) { 0 };
+        case (?s) { s.size() };
+      };
+      let isFollowing = switch (channelFollowers.get(ch.id)) {
+        case (null) { false };
+        case (?s) { s.contains(caller) };
+      };
+      let ownerProfile = switch (users.get(ch.owner)) {
+        case (null) { { username = "unknown"; displayName = "Unknown"; lastSeen = 0; bio = null; avatarUrl = null } };
+        case (?p) { p };
+      };
+      { channel = ch; followerCount; isFollowing; ownerProfile };
+    });
+  };
+
+  public query ({ caller }) func getChannelsByCategory(category : Text) : async [ChannelWithMeta] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can view channels");
+    };
+    channels.values().toArray().filter(func(ch) {
+      switch (ch.category) {
+        case (null) { false };
+        case (?cat) { cat == category };
+      };
+    }).map(func(ch) {
       let followerCount = switch (channelFollowers.get(ch.id)) {
         case (null) { 0 };
         case (?s) { s.size() };
@@ -1480,6 +1636,8 @@ actor {
       };
       timestamp = Time.now();
       readReceipts = [{ userId = caller; timestamp = Time.now() }];
+      replyTo = null;
+      reactions = [];
     };
     let conversation = getConversationOrTrap(conversationId);
     saveConversation({ conversation with messages = conversation.messages.concat([message]); lastMessageTimestamp = Time.now() });
@@ -1727,13 +1885,15 @@ actor {
             id;
           };
         };
-        let msgText = "[Gold Request] @" # callerProfile.username # " wants to BUY " # amount.toText() # " Gold";
+        let whole = amount / 100; let frac = amount % 100; let fracText = if (frac < 10) { "0" # frac.toText() } else { frac.toText() }; let goldAmtText = whole.toText() # "." # fracText; let msgText = "[Gold Request] @" # callerProfile.username # " wants to BUY " # goldAmtText # " Gold";
         let msg = {
           id = nextMessageId;
           sender = caller;
           content = { text = msgText; mediaUrl = null; mediaType = null };
           timestamp = Time.now();
           readReceipts = [{ userId = caller; timestamp = Time.now() }];
+          replyTo = null;
+          reactions = [];
         };
         nextMessageId += 1;
         let conv = getConversationOrTrap(convId);
@@ -1778,13 +1938,15 @@ actor {
             id;
           };
         };
-        let msgText = "[Gold Request] @" # callerProfile.username # " wants to SELL " # amount.toText() # " Gold";
+        let whole2 = amount / 100; let frac2 = amount % 100; let fracText2 = if (frac2 < 10) { "0" # frac2.toText() } else { frac2.toText() }; let goldAmtText2 = whole2.toText() # "." # fracText2; let msgText = "[Gold Request] @" # callerProfile.username # " wants to SELL " # goldAmtText2 # " Gold";
         let msg = {
           id = nextMessageId;
           sender = caller;
           content = { text = msgText; mediaUrl = null; mediaType = null };
           timestamp = Time.now();
           readReceipts = [{ userId = caller; timestamp = Time.now() }];
+          replyTo = null;
+          reactions = [];
         };
         nextMessageId += 1;
         let conv = getConversationOrTrap(convId);
@@ -1855,6 +2017,256 @@ actor {
     switch (goldTransactions.get(caller)) {
       case (null) { [] };
       case (?lst) { lst.toArray() };
+    };
+  };
+
+  // ============================================================
+  // Analytics Endpoints (aggregate counts, no auth required)
+  // ============================================================
+
+  // User-specific analytics (authenticated)
+  public query ({ caller }) func getUserMessageCount() : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    var total : Nat = 0;
+    for (conv in conversations.values()) {
+      for (msg in conv.messages.vals()) {
+        if (msg.sender == caller) {
+          total += 1;
+        };
+      };
+    };
+    total;
+  };
+
+  public query ({ caller }) func getUserStoriesPosted() : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    var total : Nat = 0;
+    for (status in statuses.values()) {
+      if (status.author == caller) {
+        total += 1;
+      };
+    };
+    total;
+  };
+
+  public query ({ caller }) func getUserChannelsCreated() : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    var total : Nat = 0;
+    for (ch in channels.values()) {
+      if (ch.owner == caller) {
+        total += 1;
+      };
+    };
+    total;
+  };
+
+  public query func getTotalUsers() : async Nat {
+    users.size();
+  };
+
+  public query func getTotalMessagesCount() : async Nat {
+    var total : Nat = 0;
+    for (conv in conversations.values()) {
+      total += conv.messages.size();
+    };
+    total;
+  };
+
+  public query func getTotalGoldVolume() : async Float {
+    var total : Nat = 0;
+    for ((_, txList) in goldTransactions.entries()) {
+      for (tx in txList.toArray().vals()) {
+        switch (tx.txType) {
+          case (#sent) { total += tx.amount };
+          case (_) {};
+        };
+      };
+    };
+    // Fall back to sum of all balances if no transactions exist
+    if (total == 0) {
+      for ((_, bal) in goldBalances.entries()) {
+        total += bal;
+      };
+    };
+    total.toFloat() / 100.0;
+  };
+
+  public query func getActiveUsersCount() : async Nat {
+    let sevenDaysNs : Int = 7 * 24 * 60 * 60 * 1_000_000_000;
+    let cutoff : Int = Time.now() - sevenDaysNs;
+    var count : Nat = 0;
+    for ((_, profile) in users.entries()) {
+      if (profile.lastSeen > cutoff) {
+        count += 1;
+      };
+    };
+    count;
+  };
+
+  public query func getTotalChannelsCreated() : async Nat {
+    channels.size();
+  };
+
+  public query func getTotalStoriesPosted() : async Nat {
+    statuses.size();
+  };
+
+  // ============================================================
+  // Highlights Endpoints
+  // ============================================================
+
+  public shared ({ caller }) func saveToHighlights(statusId : StatusId) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can save highlights");
+    };
+    // Only the story author can save their own story to highlights
+    switch (statuses.get(statusId)) {
+      case (null) { return #err("Story not found") };
+      case (?status) {
+        if (status.author != caller) {
+          return #err("You can only highlight your own stories");
+        };
+      };
+    };
+    switch (highlights.get(caller)) {
+      case (null) {
+        let lst = List.empty<StatusId>();
+        lst.add(statusId);
+        highlights.add(caller, lst);
+      };
+      case (?lst) {
+        // Avoid duplicates
+        if (lst.find(func(id) { id == statusId }) == null) {
+          lst.add(statusId);
+        };
+      };
+    };
+    #ok;
+  };
+
+  public shared ({ caller }) func removeFromHighlights(statusId : StatusId) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can remove highlights");
+    };
+    switch (highlights.get(caller)) {
+      case (null) { () };
+      case (?lst) {
+        let filtered = lst.filter(func(id) { id != statusId });
+        highlights.add(caller, filtered);
+      };
+    };
+    #ok;
+  };
+
+  public query ({ caller }) func getHighlights(userId : UserId) : async [Status] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can view highlights");
+    };
+    switch (highlights.get(userId)) {
+      case (null) { [] };
+      case (?lst) {
+        // Return all highlighted stories — highlights never expire
+        lst.toArray().filterMap(func(statusId) { statuses.get(statusId) });
+      };
+    };
+  };
+
+  public query ({ caller }) func isHighlighted(statusId : StatusId) : async Bool {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can check highlight status");
+    };
+    switch (highlights.get(caller)) {
+      case (null) { false };
+      case (?lst) { lst.find(func(id) { id == statusId }) != null };
+    };
+  };
+
+  // Record a unique story view. Each principal is only counted once per story.
+  public shared ({ caller }) func recordStoryView(statusId : StatusId) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can record story views");
+    };
+    // Verify story exists
+    switch (statuses.get(statusId)) {
+      case (null) { Runtime.trap("Story not found") };
+      case (?_) {};
+    };
+    switch (storyViews.get(statusId)) {
+      case (null) {
+        let viewers = Set.empty<UserId>();
+        viewers.add(caller);
+        storyViews.add(statusId, viewers);
+      };
+      case (?viewers) {
+        viewers.add(caller);
+      };
+    };
+  };
+
+  // Returns the list of usernames who have viewed a specific story/highlight.
+  public query ({ caller }) func getStoryViewers(statusId : StatusId) : async [Text] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can view story viewers");
+    };
+    switch (storyViews.get(statusId)) {
+      case (null) { [] };
+      case (?viewers) {
+        viewers.toArray().map<UserId, Text>(func(viewerId) {
+          switch (users.get(viewerId)) {
+            case (?profile) { profile.username };
+            case (null) { "" };
+          };
+        }).filter(func(username) { username != "" });
+      };
+    };
+  };
+
+  // Returns the list of usernames who viewed a story — only the story owner can call this.
+  public query ({ caller }) func getStoryViewersList(statusId : StatusId) : async [Text] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can view story viewers");
+    };
+    // Only the story owner may see the viewer list
+    switch (statuses.get(statusId)) {
+      case (null) { Runtime.trap("Story not found") };
+      case (?status) {
+        if (status.author != caller) {
+          Runtime.trap("Only the story owner can view the viewer list");
+        };
+      };
+    };
+    switch (storyViews.get(statusId)) {
+      case (null) { [] };
+      case (?viewers) {
+        viewers.toArray().map<UserId, Text>(func(viewerId) {
+          switch (users.get(viewerId)) {
+            case (?profile) { profile.username };
+            case (null) { "" };
+          };
+        }).filter(func(username) { username != "" });
+      };
+    };
+  };
+
+  // Delete (remove) a story from the caller's highlights.
+  // Only the highlights owner can delete their own highlights.
+  // Does NOT delete the original story.
+  public shared ({ caller }) func deleteHighlight(statusId : StatusId) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can delete their highlights");
+    };
+    switch (highlights.get(caller)) {
+      case (null) { () };
+      case (?lst) {
+        let filtered = lst.filter(func(id) { id != statusId });
+        highlights.add(caller, filtered);
+      };
     };
   };
 };

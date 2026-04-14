@@ -5,10 +5,10 @@ import { useEffect, useState } from "react";
 const STORAGE_KEY = "pwa-banner-dismissed";
 
 function isIOS() {
-  return (
-    /iPhone|iPad|iPod/.test(navigator.userAgent) &&
-    !(window.navigator as any).standalone
-  );
+  const ua = navigator.userAgent;
+  const isIPhoneIPad = /iPhone|iPad|iPod/.test(ua);
+  const isIPadOS = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+  return (isIPhoneIPad || isIPadOS) && !(window.navigator as any).standalone;
 }
 
 function isAndroid() {
@@ -27,9 +27,14 @@ export default function PWAInstallBanner({ triggerShow = false }: Props) {
 
   // Capture Android/desktop install prompt
   useEffect(() => {
+    // Check if already captured globally before component mounted
+    if ((window as any).__deferredInstallPrompt) {
+      setDeferredPrompt((window as any).__deferredInstallPrompt);
+    }
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      (window as any).__deferredInstallPrompt = e;
     };
     window.addEventListener("beforeinstallprompt", handler);
     return () => window.removeEventListener("beforeinstallprompt", handler);

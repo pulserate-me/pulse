@@ -1,10 +1,24 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Heart, Plus, Send, X } from "lucide-react";
+import { useActor } from "@caffeineai/core-infrastructure";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Eye,
+  Heart,
+  Loader2,
+  Plus,
+  Send,
+  Sparkles,
+  Users,
+  X,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import type { Status, UserProfile } from "../backend";
+import { createActor } from "../backend";
+import type { StatusId } from "../backend";
 import {
   useCommentOnStatus,
   useGetAllStories,
@@ -15,6 +29,104 @@ import {
 } from "../hooks/useQueries";
 import AddStatusModal from "./AddStatusModal";
 import UserProfileModal from "./UserProfileModal";
+
+// ─── Story Viewers panel ─────────────────────────────────────────────────────
+
+function useGetStoryViewers(statusId: StatusId | null) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<string[]>({
+    queryKey: ["storyViewers", statusId?.toString()],
+    queryFn: async () => {
+      if (!actor || statusId === null) return [];
+      return (actor as ReturnType<typeof createActor>).getStoryViewers(
+        statusId,
+      );
+    },
+    enabled: !!actor && !isFetching && statusId !== null,
+    staleTime: 15000,
+  });
+}
+
+function StoryViewersPanel({
+  statusId,
+  onClose,
+}: {
+  statusId: StatusId;
+  onClose: () => void;
+}) {
+  const { data: viewers = [], isLoading } = useGetStoryViewers(statusId);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      className="absolute bottom-0 left-0 right-0 z-40 rounded-t-2xl flex flex-col max-h-64"
+      style={{
+        background: "oklch(0.10 0.006 55)",
+        border: "1px solid oklch(0.22 0.008 55 / 0.8)",
+      }}
+      data-ocid="status.viewers_panel"
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
+        <div className="flex items-center gap-2">
+          <Eye className="h-4 w-4" style={{ color: "oklch(0.82 0.15 72)" }} />
+          <span className="text-sm font-semibold text-white">
+            {isLoading
+              ? "Views"
+              : `${viewers.length} View${viewers.length !== 1 ? "s" : ""}`}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="h-7 w-7 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+          aria-label="Close viewers"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="overflow-y-auto flex-1 py-1">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2
+              className="h-5 w-5 animate-spin"
+              style={{ color: "oklch(0.82 0.15 72)" }}
+            />
+          </div>
+        ) : viewers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-6 gap-2">
+            <Users
+              className="h-6 w-6 opacity-30"
+              style={{ color: "oklch(0.82 0.15 72)" }}
+            />
+            <p className="text-xs text-white/40">No views yet</p>
+          </div>
+        ) : (
+          <div className="flex flex-col">
+            {viewers.map((username) => (
+              <div
+                key={username}
+                className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 last:border-0"
+              >
+                <div
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                  style={{
+                    background: "oklch(0.76 0.13 72 / 0.2)",
+                    color: "oklch(0.82 0.15 72)",
+                  }}
+                >
+                  {username.slice(0, 1).toUpperCase()}
+                </div>
+                <span className="text-sm text-white/80">@{username}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 const PAGE_SIZE = 19;
 
@@ -37,6 +149,141 @@ function formatStatusTime(ts: bigint): string {
   return new Date(ms).toLocaleDateString();
 }
 
+// ─── Highlights hooks ────────────────────────────────────────────────────────
+
+function useSaveToHighlights() {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (statusId: StatusId) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await (
+        actor as ReturnType<typeof createActor>
+      ).saveToHighlights(statusId);
+      // Handle discriminated union { __kind__: "ok" } | { __kind__: "err"; err: string }
+      if (result.__kind__ === "err") {
+        throw new Error(result.err);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["highlights"] });
+    },
+  });
+}
+
+function useRemoveFromHighlights() {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (statusId: StatusId) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await (
+        actor as ReturnType<typeof createActor>
+      ).removeFromHighlights(statusId);
+      // Handle discriminated union { __kind__: "ok" } | { __kind__: "err"; err: string }
+      if (result.__kind__ === "err") {
+        throw new Error(result.err);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["highlights"] });
+    },
+  });
+}
+
+// ─── Save/Remove Highlights button ──────────────────────────────────────────
+
+function HighlightToggleButton({ statusId }: { statusId: StatusId }) {
+  const { actor, isFetching } = useActor(createActor);
+  const [isSaved, setIsSaved] = useState<boolean | null>(null);
+
+  // Check if this story is in highlights on mount via isHighlighted
+  useEffect(() => {
+    if (!actor || isFetching) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // isHighlighted(storyId: Nat): async Bool — added to backend
+        const typedActor = actor as ReturnType<typeof createActor>;
+        const result = await (
+          typedActor as unknown as {
+            isHighlighted: (id: StatusId) => Promise<boolean>;
+          }
+        ).isHighlighted(statusId);
+        if (!cancelled) {
+          setIsSaved(typeof result === "boolean" ? result : false);
+        }
+      } catch {
+        if (!cancelled) setIsSaved(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [actor, isFetching, statusId]);
+
+  const saveToHighlights = useSaveToHighlights();
+  const removeFromHighlights = useRemoveFromHighlights();
+  const isPending =
+    saveToHighlights.isPending || removeFromHighlights.isPending;
+
+  const handleToggle = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextSaved = !isSaved;
+    setIsSaved(nextSaved); // optimistic
+    if (isSaved) {
+      removeFromHighlights.mutate(statusId, {
+        onSuccess: () => toast.success("Removed from Highlights"),
+        onError: (err) => {
+          setIsSaved(true);
+          toast.error(
+            err instanceof Error
+              ? err.message
+              : "Failed to remove from Highlights",
+          );
+        },
+      });
+    } else {
+      saveToHighlights.mutate(statusId, {
+        onSuccess: () => toast.success("Saved to Highlights"),
+        onError: (err) => {
+          setIsSaved(false);
+          toast.error(
+            err instanceof Error ? err.message : "Failed to save to Highlights",
+          );
+        },
+      });
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleToggle}
+      disabled={isPending || isSaved === null}
+      data-ocid="status.highlight_toggle"
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all disabled:opacity-50"
+      style={{
+        background: isSaved
+          ? "oklch(0.82 0.15 72 / 0.2)"
+          : "oklch(0.82 0.15 72 / 0.1)",
+        color: "oklch(0.82 0.15 72)",
+        border: "1px solid oklch(0.82 0.15 72 / 0.3)",
+      }}
+      aria-label={isSaved ? "Remove from Highlights" : "Save to Highlights"}
+    >
+      {isPending ? (
+        <Loader2 className="h-3 w-3 animate-spin" />
+      ) : (
+        <Sparkles className="h-3 w-3" />
+      )}
+      {isSaved ? "Remove from Highlights" : "Save to Highlights"}
+    </button>
+  );
+}
+
+// ─── Status Viewer ───────────────────────────────────────────────────────────
+
 interface StatusViewerProps {
   profile: UserProfile;
   authorUserId: string;
@@ -56,14 +303,26 @@ function StatusViewer({
 }: StatusViewerProps) {
   const [index, setIndex] = useState(0);
   const [commentText, setCommentText] = useState("");
+  const [showViewers, setShowViewers] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const status = statuses[index];
+  const isOwnStatus = authorUserId === currentUserId;
 
   const { data: interactions } = useGetStatusInteractions(status?.id ?? null);
   const likeStatus = useLikeStatus();
   const unlikeStatus = useUnlikeStatus();
   const commentOnStatus = useCommentOnStatus();
+  const { actor } = useActor(createActor);
+
+  // Record a view whenever a new story slide is shown — skip the story owner's own views
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally re-run when index/status changes
+  useEffect(() => {
+    if (!actor || !status || isOwnStatus) return;
+    actor.recordStoryView(status.id).catch(() => {
+      // Silently ignore — view recording is best-effort
+    });
+  }, [actor, status?.id, index, isOwnStatus]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally re-run when index changes to reload video
   useEffect(() => {
@@ -76,7 +335,6 @@ function StatusViewer({
 
   const mediaKind = status.content.mediaType?.__kind__;
   const isVideo = mediaKind === "video";
-  const isOwnStatus = authorUserId === currentUserId;
 
   const goNext = () => {
     if (index < statuses.length - 1) setIndex(index + 1);
@@ -101,6 +359,8 @@ function StatusViewer({
 
   const recentComments = interactions?.comments?.slice(-3) ?? [];
   const likeCount = Number(interactions?.likeCount ?? 0);
+  // viewCount: use live value from interactions (backend stores view count in storyViews stable map)
+  const viewCount = Number(interactions?.viewCount ?? 0);
 
   return (
     <motion.div
@@ -199,7 +459,6 @@ function StatusViewer({
 
         {/* Video — onCanPlay triggers play once video is ready, avoiding race conditions */}
         {status.content.mediaUrl && isVideo && (
-          // biome-ignore lint/a11y/useMediaCaption: user-uploaded story video, captions unavailable
           <video
             ref={videoRef}
             key={String(status.id)}
@@ -242,11 +501,21 @@ function StatusViewer({
         )}
       </div>
 
-      {/* Like / Comment bar */}
+      {/* Like / Comment / Highlight bar */}
       <div
-        className="shrink-0 z-30 px-4 pb-4 pt-2 flex flex-col gap-2"
+        className="shrink-0 z-30 px-4 pb-4 pt-2 flex flex-col gap-2 relative"
         style={{ background: "oklch(0.05 0.005 55 / 0.9)" }}
       >
+        {/* Story viewers panel (own stories only) */}
+        <AnimatePresence>
+          {showViewers && isOwnStatus && (
+            <StoryViewersPanel
+              statusId={status.id}
+              onClose={() => setShowViewers(false)}
+            />
+          )}
+        </AnimatePresence>
+
         {/* Recent comments */}
         {recentComments.length > 0 && (
           <div className="flex flex-col gap-1 max-h-24 overflow-y-auto">
@@ -291,7 +560,46 @@ function StatusViewer({
             )}
           </button>
 
-          {/* Comment input */}
+          {/* View count — visible to ALL users; clickable for own story to see who viewed */}
+          {isOwnStatus ? (
+            <button
+              type="button"
+              onClick={() => setShowViewers((v) => !v)}
+              className="flex items-center gap-1 transition-opacity hover:opacity-80"
+              data-ocid="status.view_count"
+              aria-label="See who viewed this story"
+              title="See who viewed"
+            >
+              <Eye
+                className="h-4 w-4"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              />
+              <span
+                className="text-xs font-medium"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              >
+                {viewCount}
+              </span>
+            </button>
+          ) : (
+            <div
+              className="flex items-center gap-1"
+              data-ocid="status.view_count"
+            >
+              <Eye
+                className="h-4 w-4"
+                style={{ color: "oklch(0.65 0.05 72)" }}
+              />
+              <span
+                className="text-xs"
+                style={{ color: "oklch(0.65 0.05 72)" }}
+              >
+                {viewCount}
+              </span>
+            </div>
+          )}
+
+          {/* Comment input (non-owner only) */}
           {!isOwnStatus && (
             <>
               <Input
@@ -320,10 +628,19 @@ function StatusViewer({
             </>
           )}
         </div>
+
+        {/* Save to Highlights — own stories only */}
+        {isOwnStatus && (
+          <div className="flex justify-center pt-1">
+            <HighlightToggleButton statusId={status.id} />
+          </div>
+        )}
       </div>
     </motion.div>
   );
 }
+
+// ─── Main StatusView ─────────────────────────────────────────────────────────
 
 interface StatusViewProps {
   currentUserId: string;
@@ -554,6 +871,7 @@ export default function StatusView({
           setProfileViewOpen(false);
           onStartChat?.(userId);
         }}
+        currentUserId={currentUserId}
       />
 
       <AnimatePresence>
