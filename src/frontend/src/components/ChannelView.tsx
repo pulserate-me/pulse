@@ -37,6 +37,7 @@ import {
   Loader2,
   Mic,
   MoreVertical,
+  Pin,
   Send,
   Trash2,
   Users,
@@ -52,7 +53,9 @@ import {
   useFollowChannel,
   useGetChannel,
   useGetChannelPosts,
+  usePinChannelPost,
   useUnfollowChannel,
+  useUnpinChannelPost,
   useUpdateChannel,
 } from "../hooks/useQueries";
 import type { ChannelId } from "../hooks/useQueries";
@@ -305,6 +308,8 @@ export default function ChannelView({
   const { mutateAsync: addPost, isPending: posting } =
     useAddChannelPost(channelId);
   const { uploadMedia, isUploading } = useMediaUpload();
+  const { mutate: pinPost } = usePinChannelPost(channelId);
+  const { mutate: unpinPost } = useUnpinChannelPost(channelId);
 
   const [postText, setPostText] = useState("");
   const [pendingMedia, setPendingMedia] = useState<File | null>(null);
@@ -478,6 +483,23 @@ export default function ChannelView({
   const { channel, followerCount, isFollowing, ownerProfile } = channelMeta;
   const isOwner = channel.owner.toString() === currentUserId;
 
+  // Pinned post ID — handle both Candid [] | [bigint] and plain bigint shapes at runtime
+  const rawPinnedPost = channel?.pinnedPostId as
+    | ([] | [bigint])
+    | bigint
+    | undefined;
+  const pinnedPostId: bigint | null =
+    rawPinnedPost == null
+      ? null
+      : Array.isArray(rawPinnedPost)
+        ? rawPinnedPost.length > 0
+          ? (rawPinnedPost[0] ?? null)
+          : null
+        : rawPinnedPost;
+  const pinnedPost = pinnedPostId
+    ? (posts.find((p) => p.id === pinnedPostId) ?? null)
+    : null;
+
   const handleFollowToggle = () => {
     if (isFollowing) {
       unfollow(channelId);
@@ -491,16 +513,19 @@ export default function ChannelView({
     if (!postText.trim() && !pendingMedia && !hasEmbed) return;
     try {
       let mediaUrl: string | undefined;
-      let mediaType: any;
+      let mediaType: import("../backend").MediaType | undefined;
 
       if (hasEmbed) {
         mediaUrl = embedUrl.trim();
-        const platformMap = {
+        const platformMap: Record<string, string> = {
           youtube: "embedYouTube",
           x: "embedX",
           tiktok: "embedTikTok",
         };
-        mediaType = { other: platformMap[detectedPlatform!] };
+        mediaType = {
+          __kind__: "other",
+          other: platformMap[detectedPlatform!],
+        };
       } else if (pendingMedia) {
         const result = await uploadMedia(pendingMedia);
         mediaUrl = result.url;
@@ -912,6 +937,63 @@ export default function ChannelView({
         </div>
       )}
 
+      {/* Pinned post banner — channel owner only shown to all */}
+      {pinnedPost && (
+        <div
+          data-ocid="channel.pinned_post_banner"
+          className="shrink-0 border-b border-border"
+          style={{ background: "oklch(0.13 0.025 65)" }}
+        >
+          <div className="relative">
+            <button
+              type="button"
+              className="w-full flex items-center gap-2 px-4 py-2 pr-10 text-left hover:bg-muted/20 transition-colors"
+              onClick={() => {
+                const el = document.querySelector(
+                  `[data-ocid="channel.post.item.${sortedPosts.indexOf(pinnedPost) + 1}"]`,
+                );
+                el?.scrollIntoView({ behavior: "smooth", block: "center" });
+              }}
+              aria-label="Go to pinned post"
+            >
+              <Pin
+                className="h-3.5 w-3.5 shrink-0"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              />
+              <div className="flex-1 min-w-0">
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-wider block"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                >
+                  Pinned post
+                </span>
+                <span className="text-xs text-muted-foreground truncate block">
+                  {pinnedPost.content.mediaUrl
+                    ? "📎 Media"
+                    : (pinnedPost.content.text?.slice(0, 70) ?? "")}
+                </span>
+              </div>
+            </button>
+            {isOwner && (
+              <button
+                type="button"
+                data-ocid="channel.pinned_post.unpin_button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  unpinPost(undefined, {
+                    onError: () => toast.error("Failed to unpin post"),
+                  });
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
+                aria-label="Unpin post"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Posts feed */}
       <ScrollArea className="flex-1 min-h-0">
         <div className="p-4 flex flex-col gap-4">
@@ -957,6 +1039,23 @@ export default function ChannelView({
                   currentUserId={currentUserId}
                   channelId={channelId}
                   index={idx}
+                  isPinned={pinnedPostId != null && post.id === pinnedPostId}
+                  onPin={
+                    isOwner
+                      ? (postId) =>
+                          pinPost(postId, {
+                            onError: () => toast.error("Failed to pin post"),
+                          })
+                      : undefined
+                  }
+                  onUnpin={
+                    isOwner
+                      ? () =>
+                          unpinPost(undefined, {
+                            onError: () => toast.error("Failed to unpin post"),
+                          })
+                      : undefined
+                  }
                 />
               ))}
               {hasMorePosts && (

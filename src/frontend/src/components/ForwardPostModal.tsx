@@ -9,11 +9,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, Search } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { ConversationId } from "../backend";
 import {
   useForwardChannelPost,
+  useGetGroupAvatars,
   useGetUserProfile,
   useListUserConversations,
 } from "../hooks/useQueries";
@@ -31,10 +32,12 @@ function getInitials(name: string) {
 function ConvItem({
   conversation,
   currentUserId,
+  groupAvatarUrl,
   onSelect,
 }: {
   conversation: any;
   currentUserId: string;
+  groupAvatarUrl?: string;
   onSelect: () => void;
 }) {
   const isGroup = conversation.type.__kind__ === "group";
@@ -55,9 +58,11 @@ function ConvItem({
       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-muted/50 transition-colors text-left"
     >
       <Avatar className="w-10 h-10 shrink-0">
-        {otherProfile?.avatarUrl && (
+        {isGroup && groupAvatarUrl ? (
+          <AvatarImage src={groupAvatarUrl} alt={name} />
+        ) : !isGroup && otherProfile?.avatarUrl ? (
           <AvatarImage src={otherProfile.avatarUrl} alt={name} />
-        )}
+        ) : null}
         <AvatarFallback
           className="text-sm font-semibold"
           style={{
@@ -89,6 +94,15 @@ export default function ForwardPostModal({
   const [search, setSearch] = useState("");
   const { data: conversations = [] } = useListUserConversations();
   const { mutateAsync: forwardPost, isPending } = useForwardChannelPost();
+  const { data: groupAvatarsData } = useGetGroupAvatars();
+
+  const groupAvatarMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const [id, url] of groupAvatarsData ?? []) {
+      m.set(id.toString(), url);
+    }
+    return m;
+  }, [groupAvatarsData]);
 
   const filtered = conversations.filter((c) => {
     if (!search.trim()) return true;
@@ -147,6 +161,11 @@ export default function ForwardPostModal({
                 key={conv.id.toString()}
                 conversation={conv}
                 currentUserId={currentUserId}
+                groupAvatarUrl={
+                  conv.type.__kind__ === "group"
+                    ? groupAvatarMap.get(conv.id.toString())
+                    : undefined
+                }
                 onSelect={() => handleForward(conv.id)}
               />
             ))

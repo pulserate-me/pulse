@@ -30,6 +30,8 @@ import {
   Loader2,
   MessageCircle,
   MoreVertical,
+  Pin,
+  PinOff,
   Send,
   Share2,
   Trash2,
@@ -229,17 +231,23 @@ interface ChannelPostCardProps {
   currentUserId: string;
   channelId: ChannelId;
   index: number;
+  isPinned?: boolean;
+  onPin?: (postId: ChannelPostId) => void;
+  onUnpin?: () => void;
 }
 
 export default function ChannelPostCard({
   post,
   authorName,
   authorAvatar,
-  isOwner: _isOwner,
+  isOwner,
   isPostAuthor,
   currentUserId,
   channelId,
   index,
+  isPinned = false,
+  onPin,
+  onUnpin,
 }: ChannelPostCardProps) {
   const [showComments, setShowComments] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -329,8 +337,8 @@ export default function ChannelPostCard({
           </p>
         </div>
 
-        {/* Edit/Delete menu for post author */}
-        {isPostAuthor && (
+        {/* Edit/Delete menu for post author; Pin/Unpin for channel owner */}
+        {(isPostAuthor || isOwner) && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -343,25 +351,49 @@ export default function ChannelPostCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="bg-card border-border">
-              <DropdownMenuItem
-                onClick={() => {
-                  setEditText(post.content.text);
-                  setEditOpen(true);
-                }}
-                className="cursor-pointer"
-                data-ocid={`channel.post.edit_button.${ocid}`}
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                Edit Post
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setDeleteOpen(true)}
-                className="cursor-pointer text-destructive focus:text-destructive"
-                data-ocid={`channel.post.delete_button.${ocid}`}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete Post
-              </DropdownMenuItem>
+              {isPostAuthor && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setEditText(post.content.text);
+                    setEditOpen(true);
+                  }}
+                  className="cursor-pointer"
+                  data-ocid={`channel.post.edit_button.${ocid}`}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Post
+                </DropdownMenuItem>
+              )}
+              {isOwner && onPin && !isPinned && (
+                <DropdownMenuItem
+                  onClick={() => onPin(post.id)}
+                  className="cursor-pointer"
+                  data-ocid={`channel.post.pin_button.${ocid}`}
+                >
+                  <Pin className="h-4 w-4 mr-2" />
+                  Pin Post
+                </DropdownMenuItem>
+              )}
+              {isOwner && onUnpin && isPinned && (
+                <DropdownMenuItem
+                  onClick={() => onUnpin()}
+                  className="cursor-pointer"
+                  data-ocid={`channel.post.unpin_button.${ocid}`}
+                >
+                  <PinOff className="h-4 w-4 mr-2" />
+                  Unpin Post
+                </DropdownMenuItem>
+              )}
+              {isPostAuthor && (
+                <DropdownMenuItem
+                  onClick={() => setDeleteOpen(true)}
+                  className="cursor-pointer text-destructive focus:text-destructive"
+                  data-ocid={`channel.post.delete_button.${ocid}`}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Post
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}

@@ -35,7 +35,8 @@ type Channel__349342183 =
     description : Text;
     id : ChannelId__279479923;
     name : Text;
-    owner : UserId__313180070
+    owner : UserId__313180070;
+    pinnedPostId : ?ChannelPostId__748044666
   };
 type CommentId__265911312 = Nat;
 type ConversationId__59272760 = Nat;
@@ -46,6 +47,7 @@ type Conversation__183739819 =
     lastMessageTimestamp : Int;
     members : [UserId__313180070];
     messages : [Message__19119041];
+    pinnedMessageId : ?MessageId__147617357;
     type_ : ConversationType__826145274
   };
 type Data__159895909<T> = {var count : Nat__490723111; elements : [var ?T]};
@@ -271,6 +273,15 @@ actor {
     {
       var root :
         Node__46230540<StatusId__33433321, Set__532252804<UserId__313180070>>;
+      var size : Nat__490723111
+    };
+  stable typingExpiryNs : Int;
+  stable typingStatus :
+    {
+      var root :
+        Node__46230540<ConversationId__59272760,
+                        List__415060402<(UserId__313180070,
+                                         Timestamp__672038077)>>;
       var size : Nat__490723111
     };
   stable users :

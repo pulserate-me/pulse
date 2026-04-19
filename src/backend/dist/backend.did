@@ -162,6 +162,7 @@ type Conversation =
    lastMessageTimestamp: int;
    members: vec UserId;
    messages: vec Message;
+   pinnedMessageId: opt MessageId;
    "type": ConversationType;
  };
 type CommentId = nat;
@@ -211,6 +212,7 @@ type Channel =
    id: ChannelId;
    name: text;
    owner: UserId;
+   pinnedPostId: opt ChannelPostId;
  };
 type AppNotification = 
  record {
@@ -306,11 +308,17 @@ service : {
   getStatusInteractions: (statusId: StatusId) -> (StatusInteractions) query;
   getStoryViewers: (statusId: StatusId) -> (vec text) query;
   getStoryViewersList: (statusId: StatusId) -> (vec text) query;
+  getStoryViewersWithAvatars: (statusId: StatusId) ->
+   (vec record {
+          avatarUrl: opt text;
+          username: text;
+        }) query;
   getTotalChannelsCreated: () -> (nat) query;
   getTotalGoldVolume: () -> (float64) query;
   getTotalMessagesCount: () -> (nat) query;
   getTotalStoriesPosted: () -> (nat) query;
   getTotalUsers: () -> (nat) query;
+  getTypingUsers: (convId: ConversationId) -> (vec text) query;
   getUnreadCount: (conversationId: ConversationId) -> (nat) query;
   getUserByPrincipal: (userId: UserId) -> (opt UserProfile) query;
   getUserChannelsCreated: () -> (nat) query;
@@ -329,6 +337,21 @@ service : {
   markAsRead: (conversationId: ConversationId) -> ();
   markMessagesAsRead: (conversationId: ConversationId) -> ();
   markNotificationsRead: () -> ();
+  /// Pin a post in a channel.
+  /// Only the channel owner may pin.
+  pinChannelPost: (channelId: ChannelId, postId: ChannelPostId) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  /// Pin a message in a conversation or group.
+  /// - Direct conversations: any member may pin.
+  /// - Group conversations: only the group owner (creator) may pin.
+  pinMessage: (conversationId: ConversationId, messageId: MessageId) ->
+   (variant {
+      err: text;
+      ok;
+    });
   recordStoryView: (statusId: StatusId) -> ();
   removeFromHighlights: (statusId: StatusId) -> (variant {
                                                    err: text;
@@ -356,11 +379,24 @@ service : {
         }) query;
   sendMessage: (conversationId: ConversationId, messageInput:
    MessageInput) -> (MessageId);
+  setTypingStatus: (convId: ConversationId, isTyping: bool) -> ();
   transferGold: (toUsername: text, amount: nat) -> ();
   unblockUser: (targetUserId: UserId) -> ();
   unfollowChannel: (channelId: ChannelId) -> ();
   unlikeChannelPost: (postId: ChannelPostId) -> ();
   unlikeStatus: (statusId: StatusId) -> ();
+  /// Remove the pinned post from a channel.
+  /// Only the channel owner may unpin.
+  unpinChannelPost: (channelId: ChannelId) -> (variant {
+                                                 err: text;
+                                                 ok;
+                                               });
+  /// Remove the pinned message from a conversation.
+  /// Any conversation member may unpin.
+  unpinMessage: (conversationId: ConversationId) -> (variant {
+                                                       err: text;
+                                                       ok;
+                                                     });
   updateCallerAvatar: (avatarUrl: text) -> ();
   updateCallerBio: (bio: text) -> ();
   updateCallerDisplayName: (displayName: text) -> ();

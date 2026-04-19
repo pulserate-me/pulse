@@ -23,6 +23,7 @@ import _Storage "mo:caffeineai-object-storage/Storage";
 
 
 
+
 actor {
   let accessControlState = AccessControl.initState();
   include MixinAuthorization(accessControlState);
@@ -94,6 +95,7 @@ actor {
     messages : [Message];
     type_ : ConversationType;
     lastMessageTimestamp : Int;
+    pinnedMessageId : ?MessageId;
   };
 
   public type StatusContent = {
@@ -140,6 +142,7 @@ actor {
     owner : UserId;
     createdAt : Timestamp;
     category : ?Text;
+    pinnedPostId : ?ChannelPostId;
   };
 
   public type ChannelPostContent = {
@@ -599,6 +602,7 @@ actor {
           messages = [];
           type_ = #direct;
           lastMessageTimestamp = Time.now();
+          pinnedMessageId = null;
         };
         saveConversation(conversation);
         convId;
@@ -624,6 +628,7 @@ actor {
       messages = [];
       type_ = #group(name);
       lastMessageTimestamp = Time.now();
+      pinnedMessageId = null;
     };
     saveConversation(conversation);
     groupCreators.add(convId, caller);
@@ -1335,6 +1340,7 @@ actor {
       owner = caller;
       createdAt = Time.now();
       category;
+      pinnedPostId = null;
     };
     channels.add(channelId, channel);
     channelId;
@@ -1881,7 +1887,7 @@ actor {
           case (null) {
             let id = nextConversationId;
             nextConversationId += 1;
-            saveConversation({ id; members = [caller, adminId]; messages = []; type_ = #direct; lastMessageTimestamp = Time.now() });
+            saveConversation({ id; members = [caller, adminId]; messages = []; type_ = #direct; lastMessageTimestamp = Time.now(); pinnedMessageId = null });
             id;
           };
         };
@@ -1934,7 +1940,7 @@ actor {
           case (null) {
             let id = nextConversationId;
             nextConversationId += 1;
-            saveConversation({ id; members = [caller, adminId]; messages = []; type_ = #direct; lastMessageTimestamp = Time.now() });
+            saveConversation({ id; members = [caller, adminId]; messages = []; type_ = #direct; lastMessageTimestamp = Time.now(); pinnedMessageId = null });
             id;
           };
         };
@@ -2254,6 +2260,33 @@ actor {
     };
   };
 
+  // Returns the list of viewers with their avatars — only the story owner can call this.
+  public query ({ caller }) func getStoryViewersWithAvatars(statusId : StatusId) : async [{ username : Text; avatarUrl : ?Text }] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return [];
+    };
+    // Only the story owner may see the viewer list
+    switch (statuses.get(statusId)) {
+      case (null) { return [] };
+      case (?status) {
+        if (status.author != caller) {
+          return [];
+        };
+      };
+    };
+    switch (storyViews.get(statusId)) {
+      case (null) { [] };
+      case (?viewers) {
+        viewers.toArray().filterMap<UserId, { username : Text; avatarUrl : ?Text }>(func(viewerId) {
+          switch (users.get(viewerId)) {
+            case (null) { null };
+            case (?profile) { ?{ username = profile.username; avatarUrl = profile.avatarUrl } };
+          };
+        });
+      };
+    };
+  };
+
   // Delete (remove) a story from the caller's highlights.
   // Only the highlights owner can delete their own highlights.
   // Does NOT delete the original story.
@@ -2268,5 +2301,148 @@ actor {
         highlights.add(caller, filtered);
       };
     };
+  };
+
+  // ── Typing Indicator ──────────────────────────────────────────────────────
+  // Map: ConversationId → List of (UserId, Timestamp) pairs
+  let typingStatus = Map.empty<ConversationId, List.List<(UserId, Timestamp)>>();
+
+  // Typing expires after 5 seconds (in nanoseconds)
+  let typingExpiryNs : Int = 5_000_000_000;
+
+  // Set or clear the caller's typing status in a conversation.
+  public shared ({ caller }) func setTypingStatus(convId : ConversationId, isTyping : Bool) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    let now = Time.now();
+    let existing : List.List<(UserId, Timestamp)> = switch (typingStatus.get(convId)) {
+      case (null) { List.empty() };
+      case (?lst) { lst };
+    };
+    // Remove stale entries and the caller's existing entry
+    let cleaned = existing.filter(func(entry : (UserId, Timestamp)) : Bool {
+      entry.0 != caller and (now - entry.1) < typingExpiryNs
+    });
+    if (isTyping) {
+      cleaned.add((caller, now));
+    };
+    typingStatus.add(convId, cleaned);
+  };
+
+  // Return usernames of users currently typing in the conversation (excluding the caller).
+  public shared query ({ caller }) func getTypingUsers(convId : ConversationId) : async [Text] {
+    let now = Time.now();
+    switch (typingStatus.get(convId)) {
+      case (null) { [] };
+      case (?lst) {
+        lst.filter(func(entry : (UserId, Timestamp)) : Bool {
+          entry.0 != caller and (now - entry.1) < typingExpiryNs
+        }).map<(UserId, Timestamp), Text>(func(entry) {
+          switch (users.get(entry.0)) {
+            case (?profile) { profile.username };
+            case (null) { "" };
+          };
+        }).filter(func(name : Text) : Bool { name != "" }).toArray();
+      };
+    };
+  };
+
+  // ── Pinned Messages / Pinned Channel Posts ────────────────────────────────
+
+  /// Pin a message in a conversation or group.
+  /// - Direct conversations: any member may pin.
+  /// - Group conversations: only the group owner (creator) may pin.
+  public shared ({ caller }) func pinMessage(conversationId : ConversationId, messageId : MessageId) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+    if (not isConversationMember(conversationId, caller)) {
+      return #err("You are not a member of this conversation");
+    };
+    let conv = switch (conversations.get(conversationId)) {
+      case (null) { return #err("Conversation not found") };
+      case (?c) { c };
+    };
+    // For group conversations, only the group owner may pin
+    switch (conv.type_) {
+      case (#group(_)) {
+        switch (groupCreators.get(conversationId)) {
+          case (?creator) {
+            if (creator != caller) {
+              return #err("Only the group owner can pin messages in a group");
+            };
+          };
+          case (null) {};
+        };
+      };
+      case (#direct) {};
+    };
+    // Verify the message exists in this conversation
+    if (conv.messages.findIndex(func(m : Message) : Bool { m.id == messageId }) == null) {
+      return #err("Message not found in this conversation");
+    };
+    saveConversation({ conv with pinnedMessageId = ?messageId });
+    #ok;
+  };
+
+  /// Remove the pinned message from a conversation.
+  /// Any conversation member may unpin.
+  public shared ({ caller }) func unpinMessage(conversationId : ConversationId) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+    if (not isConversationMember(conversationId, caller)) {
+      return #err("You are not a member of this conversation");
+    };
+    let conv = switch (conversations.get(conversationId)) {
+      case (null) { return #err("Conversation not found") };
+      case (?c) { c };
+    };
+    saveConversation({ conv with pinnedMessageId = null });
+    #ok;
+  };
+
+  /// Pin a post in a channel.
+  /// Only the channel owner may pin.
+  public shared ({ caller }) func pinChannelPost(channelId : ChannelId, postId : ChannelPostId) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+    let ch = switch (channels.get(channelId)) {
+      case (null) { return #err("Channel not found") };
+      case (?c) { c };
+    };
+    if (ch.owner != caller) {
+      return #err("Only the channel owner can pin posts");
+    };
+    // Verify the post belongs to this channel
+    switch (channelPosts.get(postId)) {
+      case (null) { return #err("Post not found") };
+      case (?post) {
+        if (post.channelId != channelId) {
+          return #err("Post does not belong to this channel");
+        };
+      };
+    };
+    channels.add(channelId, { ch with pinnedPostId = ?postId });
+    #ok;
+  };
+
+  /// Remove the pinned post from a channel.
+  /// Only the channel owner may unpin.
+  public shared ({ caller }) func unpinChannelPost(channelId : ChannelId) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+    let ch = switch (channels.get(channelId)) {
+      case (null) { return #err("Channel not found") };
+      case (?c) { c };
+    };
+    if (ch.owner != caller) {
+      return #err("Only the channel owner can unpin posts");
+    };
+    channels.add(channelId, { ch with pinnedPostId = null });
+    #ok;
   };
 };

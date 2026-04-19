@@ -37,6 +37,7 @@ import {
   useGetTotalStoriesPosts,
   useGetTotalUsersCount,
   useGetUserChannelsCreated,
+  useGetUserGoldBalance,
   useGetUserMessageCount,
   useGetUserProfile,
   useGetUserStoriesPosted,
@@ -192,6 +193,92 @@ function ConversationItem({
   );
 }
 
+// Compact section search input with gold accent on focus
+function SectionSearchInput({
+  value,
+  onChange,
+  placeholder,
+  ocid,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  ocid: string;
+}) {
+  return (
+    <div className="relative mx-4 mb-2 mt-1">
+      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/60 pointer-events-none" />
+      <input
+        data-ocid={ocid}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full pl-7 pr-7 py-1.5 text-xs rounded-lg bg-input border transition-colors outline-none focus:ring-1"
+        style={{
+          borderColor: value
+            ? "oklch(0.76 0.13 72 / 0.5)"
+            : "oklch(0.3 0.02 55)",
+          // biome-ignore lint/style/noUnusedTemplateLiteral: intentional
+          color: "inherit",
+        }}
+        onFocus={(e) => {
+          e.currentTarget.style.borderColor = "oklch(0.76 0.13 72 / 0.6)";
+          e.currentTarget.style.boxShadow =
+            "0 0 0 1px oklch(0.76 0.13 72 / 0.2)";
+        }}
+        onBlur={(e) => {
+          e.currentTarget.style.borderColor = value
+            ? "oklch(0.76 0.13 72 / 0.5)"
+            : "oklch(0.3 0.02 55)";
+          e.currentTarget.style.boxShadow = "none";
+        }}
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label="Clear search"
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Helper: resolves the partner profile for a DM and calls back with
+// (convId, displayName, username) so the parent can cache the result for search.
+function DMNameResolver({
+  conversation,
+  currentUserId,
+  onResolved,
+}: {
+  conversation: import("../backend").Conversation;
+  currentUserId: string;
+  onResolved: (convId: string, displayName: string, username: string) => void;
+}) {
+  const otherUserId =
+    conversation.members
+      .find((m) => m.toString() !== currentUserId)
+      ?.toString() ?? null;
+  const { data: profile } = useGetUserProfile(otherUserId);
+
+  useEffect(() => {
+    const displayName = profile?.displayName ?? otherUserId?.slice(0, 8) ?? "";
+    const username = profile?.username ?? "";
+    onResolved(conversation.id.toString(), displayName, username);
+  }, [
+    conversation.id,
+    otherUserId,
+    profile?.displayName,
+    profile?.username,
+    onResolved,
+  ]);
+
+  return null;
+}
+
 // ConversationSections component
 interface ConversationSectionsProps {
   filteredConversations: import("../backend").Conversation[];
@@ -216,24 +303,101 @@ function ConversationSections({
   showAllGroups,
   setShowAllGroups,
 }: ConversationSectionsProps) {
-  const dmConvs = filteredConversations.filter(
-    (c) => c.type.__kind__ !== "group",
+  const [convSearch, setConvSearch] = useState("");
+  const [groupSearch, setGroupSearch] = useState("");
+  // Cache of resolved DM partner names: convId → { displayName, username }
+  const [dmNames, setDmNames] = useState<
+    Record<string, { displayName: string; username: string }>
+  >({});
+
+  const handleDmNameResolved = useCallback(
+    (convId: string, displayName: string, username: string) => {
+      setDmNames((prev) => {
+        if (
+          prev[convId]?.displayName === displayName &&
+          prev[convId]?.username === username
+        )
+          return prev;
+        return { ...prev, [convId]: { displayName, username } };
+      });
+    },
+    [],
   );
-  const groupConvs = filteredConversations.filter(
-    (c) => c.type.__kind__ === "group",
+
+  // Sort helper: conversations with unread messages first, then preserve original order
+  const sortByUnread = (convs: import("../backend").Conversation[]) =>
+    [...convs].sort((a, b) => {
+      const unreadA = a.messages.filter(
+        (m) =>
+          m.sender.toString() !== currentUserId &&
+          !m.readReceipts.some((r) => r.userId.toString() === currentUserId),
+      ).length;
+      const unreadB = b.messages.filter(
+        (m) =>
+          m.sender.toString() !== currentUserId &&
+          !m.readReceipts.some((r) => r.userId.toString() === currentUserId),
+      ).length;
+      // Unread first; within same unread tier preserve original order (stable sort)
+      if (unreadB > 0 && unreadA === 0) return 1;
+      if (unreadA > 0 && unreadB === 0) return -1;
+      return 0;
+    });
+
+  const allDMConvs = sortByUnread(
+    filteredConversations.filter((c) => c.type.__kind__ !== "group"),
   );
+  const allGroupConvs = sortByUnread(
+    filteredConversations.filter((c) => c.type.__kind__ === "group"),
+  );
+
+  // DM search: filter by resolved partner displayName or username (case-insensitive)
+  const dmConvs = convSearch.trim()
+    ? allDMConvs.filter((c) => {
+        const q = convSearch.toLowerCase();
+        const cached = dmNames[c.id.toString()];
+        if (!cached) return false; // wait until resolved
+        return (
+          cached.displayName.toLowerCase().includes(q) ||
+          cached.username.toLowerCase().includes(q)
+        );
+      })
+    : allDMConvs;
+
+  const groupConvs = groupSearch.trim()
+    ? allGroupConvs.filter((c) =>
+        (c.type as { __kind__: "group"; group: string }).group
+          .toLowerCase()
+          .includes(groupSearch.toLowerCase()),
+      )
+    : allGroupConvs;
+
   const visibleDMs = showAllDMs ? dmConvs : dmConvs.slice(0, 9);
   const visibleGroups = showAllGroups ? groupConvs : groupConvs.slice(0, 9);
 
   return (
     <>
-      {dmConvs.length > 0 && (
+      {/* Invisible resolvers to populate dmNames cache for search */}
+      {allDMConvs.map((conv) => (
+        <DMNameResolver
+          key={conv.id.toString()}
+          conversation={conv}
+          currentUserId={currentUserId}
+          onResolved={handleDmNameResolved}
+        />
+      ))}
+      {allDMConvs.length > 0 && (
         <>
           <div className="px-4 pt-3 pb-1">
             <span className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">
               Conversations
             </span>
           </div>
+          <SectionSearchInput
+            value={convSearch}
+            onChange={setConvSearch}
+            placeholder="Search conversations…"
+            ocid="sidebar.conv_search.input"
+          />
           {visibleDMs.map((conv, idx) => (
             <ConversationItem
               key={conv.id.toString()}
@@ -256,15 +420,26 @@ function ConversationSections({
               {showAllDMs ? "Show less" : `Show ${dmConvs.length - 9} more`}
             </button>
           )}
+          {convSearch.trim() && dmConvs.length === 0 && (
+            <p className="px-4 py-3 text-xs text-muted-foreground/60">
+              No conversations found
+            </p>
+          )}
         </>
       )}
-      {groupConvs.length > 0 && (
+      {allGroupConvs.length > 0 && (
         <>
           <div className="px-4 pt-3 pb-1">
             <span className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">
               Groups
             </span>
           </div>
+          <SectionSearchInput
+            value={groupSearch}
+            onChange={setGroupSearch}
+            placeholder="Search groups…"
+            ocid="sidebar.group_search.input"
+          />
           {visibleGroups.map((conv, idx) => (
             <ConversationItem
               key={conv.id.toString()}
@@ -272,7 +447,7 @@ function ConversationSections({
               currentUserId={currentUserId}
               isActive={activeConversationId === conv.id}
               onClick={() => onSelectConversation(conv.id)}
-              index={dmConvs.length + idx}
+              index={allDMConvs.length + idx}
               groupAvatar={groupAvatarMap.get(conv.id.toString())}
             />
           ))}
@@ -288,6 +463,11 @@ function ConversationSections({
                 ? "Show less"
                 : `Show ${groupConvs.length - 9} more`}
             </button>
+          )}
+          {groupSearch.trim() && groupConvs.length === 0 && (
+            <p className="px-4 py-3 text-xs text-muted-foreground/60">
+              No groups found
+            </p>
           )}
         </>
       )}
@@ -317,6 +497,7 @@ function AnalyticsDashboard({
   const { data: userMessages } = useGetUserMessageCount();
   const { data: userStories } = useGetUserStoriesPosted();
   const { data: userChannels } = useGetUserChannelsCreated();
+  const { data: userGoldBalance } = useGetUserGoldBalance();
 
   const platformMetrics = [
     {
@@ -385,6 +566,12 @@ function AnalyticsDashboard({
           ? Number(userChannels).toLocaleString()
           : "—",
       icon: "📡",
+    },
+    {
+      label: "Your Gold",
+      value:
+        userGoldBalance !== undefined ? `✦ ${userGoldBalance.toFixed(2)}` : "—",
+      icon: "✦",
     },
   ];
 
@@ -480,7 +667,7 @@ function AnalyticsDashboard({
               Log in to see your stats
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-2 gap-2.5">
               {personalMetrics.map((metric) => (
                 <div
                   key={metric.label}
@@ -664,7 +851,6 @@ export default function Sidebar({
   onViewProfile,
   onLogout,
 }: SidebarProps) {
-  const [search, setSearch] = useState("");
   const [universalSearchActive, setUniversalSearchActive] = useState(false);
   const [universalQuery, setUniversalQuery] = useState("");
   const [userSearchResults, setUserSearchResults] = useState<
@@ -710,17 +896,8 @@ export default function Sidebar({
 
   const filteredConversations = useCallback(() => {
     if (!conversations) return [];
-    if (!search.trim()) return conversations;
-    const q = search.toLowerCase();
-    return conversations.filter((c) => {
-      if (c.type.__kind__ === "group") {
-        return (c.type as { __kind__: "group"; group: string }).group
-          .toLowerCase()
-          .includes(q);
-      }
-      return true;
-    });
-  }, [conversations, search])();
+    return conversations;
+  }, [conversations])();
 
   const handleConversationCreated = (id: ConversationId) => {
     setNewChatOpen(false);
@@ -899,29 +1076,17 @@ export default function Sidebar({
                 <Search className="h-4 w-4" />
               </Button>
             )}
-            {activeTab === "chats" && !universalSearchActive && (
-              <>
-                <Button
-                  data-ocid="sidebar.scan_qr_button"
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => setQrScannerOpen(true)}
-                  className="h-9 w-9 rounded-xl hover:bg-muted"
-                  aria-label="Scan QR code"
-                >
-                  <ScanLine className="h-5 w-5" />
-                </Button>
-                <Button
-                  data-ocid="sidebar.new_chat_button"
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => setNewChatOpen(true)}
-                  className="h-9 w-9 rounded-xl hover:bg-muted"
-                  aria-label="New chat"
-                >
-                  <Plus className="h-5 w-5" />
-                </Button>
-              </>
+            {!universalSearchActive && (
+              <Button
+                data-ocid="sidebar.scan_qr_button"
+                size="icon"
+                variant="ghost"
+                onClick={() => setQrScannerOpen(true)}
+                className="h-9 w-9 rounded-xl hover:bg-muted"
+                aria-label="Scan QR code"
+              >
+                <ScanLine className="h-5 w-5" />
+              </Button>
             )}
             <NotificationBell />
             <Button
@@ -1050,17 +1215,35 @@ export default function Sidebar({
           </TabsList>
 
           <TabsContent value="chats" className="mt-0">
-            {/* Search */}
-            <div className="relative mt-3">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                data-ocid="sidebar.search_input"
-                placeholder="Search conversations..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9 bg-input border-border h-9 text-sm"
-              />
-            </div>
+            {/* New Chat button */}
+            <button
+              type="button"
+              data-ocid="sidebar.new_chat_button"
+              onClick={() => setNewChatOpen(true)}
+              className="mt-3 mx-4 w-[calc(100%-2rem)] flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-colors hover:bg-muted/50"
+              style={{
+                border: "1px solid oklch(0.82 0.15 72 / 0.25)",
+                background: "oklch(0.82 0.15 72 / 0.05)",
+              }}
+            >
+              <span
+                className="flex items-center justify-center w-6 h-6 rounded-full shrink-0"
+                style={{
+                  background: "oklch(0.82 0.15 72 / 0.15)",
+                }}
+              >
+                <Plus
+                  className="h-3.5 w-3.5"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                />
+              </span>
+              <span
+                className="text-sm font-medium"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              >
+                New Chat
+              </span>
+            </button>
           </TabsContent>
 
           <TabsContent value="status" className="mt-0" />
@@ -1232,6 +1415,10 @@ export default function Sidebar({
           currentUserId={currentUserId}
           currentProfile={currentProfile}
           onStartChat={onStartChat}
+          onSelectChannel={(id) => {
+            setActiveTab("channels");
+            onSelectChannel(id);
+          }}
         />
       ) : !universalSearchActive && activeTab === "channels" ? (
         <ChannelsTab
@@ -1268,10 +1455,10 @@ export default function Sidebar({
               >
                 <MessageCircle className="w-12 h-12 text-muted-foreground/30 mb-3" />
                 <p className="text-sm font-medium text-muted-foreground">
-                  {search ? "No conversations found" : "No conversations yet"}
+                  No conversations yet
                 </p>
                 <p className="text-xs text-muted-foreground/60 mt-1">
-                  {!search && "Tap + to start a new chat"}
+                  Tap + to start a new chat
                 </p>
               </div>
             ) : (

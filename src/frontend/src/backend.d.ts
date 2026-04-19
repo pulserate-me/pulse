@@ -145,6 +145,7 @@ export interface Channel {
     description: string;
     avatarUrl?: string;
     category?: string;
+    pinnedPostId?: ChannelPostId;
 }
 export type StatusId = bigint;
 export type UserId = Principal;
@@ -188,6 +189,7 @@ export interface Conversation {
     members: Array<UserId>;
     messages: Array<Message>;
     type: ConversationType;
+    pinnedMessageId?: MessageId;
 }
 export interface MessageInput {
     content: MessageContent;
@@ -263,11 +265,16 @@ export interface backendInterface {
     getStatusInteractions(statusId: StatusId): Promise<StatusInteractions>;
     getStoryViewers(statusId: StatusId): Promise<Array<string>>;
     getStoryViewersList(statusId: StatusId): Promise<Array<string>>;
+    getStoryViewersWithAvatars(statusId: StatusId): Promise<Array<{
+        username: string;
+        avatarUrl?: string;
+    }>>;
     getTotalChannelsCreated(): Promise<bigint>;
     getTotalGoldVolume(): Promise<number>;
     getTotalMessagesCount(): Promise<bigint>;
     getTotalStoriesPosted(): Promise<bigint>;
     getTotalUsers(): Promise<bigint>;
+    getTypingUsers(convId: ConversationId): Promise<Array<string>>;
     getUnreadCount(conversationId: ConversationId): Promise<bigint>;
     getUserByPrincipal(userId: UserId): Promise<UserProfile | null>;
     getUserChannelsCreated(): Promise<bigint>;
@@ -286,6 +293,29 @@ export interface backendInterface {
     markAsRead(conversationId: ConversationId): Promise<void>;
     markMessagesAsRead(conversationId: ConversationId): Promise<void>;
     markNotificationsRead(): Promise<void>;
+    /**
+     * / Pin a post in a channel.
+     * / Only the channel owner may pin.
+     */
+    pinChannelPost(channelId: ChannelId, postId: ChannelPostId): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
+     * / Pin a message in a conversation or group.
+     * / - Direct conversations: any member may pin.
+     * / - Group conversations: only the group owner (creator) may pin.
+     */
+    pinMessage(conversationId: ConversationId, messageId: MessageId): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     recordStoryView(statusId: StatusId): Promise<void>;
     removeFromHighlights(statusId: StatusId): Promise<{
         __kind__: "ok";
@@ -315,11 +345,34 @@ export interface backendInterface {
         profile: UserProfile;
     }>>;
     sendMessage(conversationId: ConversationId, messageInput: MessageInput): Promise<MessageId>;
+    setTypingStatus(convId: ConversationId, isTyping: boolean): Promise<void>;
     transferGold(toUsername: string, amount: bigint): Promise<void>;
     unblockUser(targetUserId: UserId): Promise<void>;
     unfollowChannel(channelId: ChannelId): Promise<void>;
     unlikeChannelPost(postId: ChannelPostId): Promise<void>;
     unlikeStatus(statusId: StatusId): Promise<void>;
+    /**
+     * / Remove the pinned post from a channel.
+     * / Only the channel owner may unpin.
+     */
+    unpinChannelPost(channelId: ChannelId): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    /**
+     * / Remove the pinned message from a conversation.
+     * / Any conversation member may unpin.
+     */
+    unpinMessage(conversationId: ConversationId): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     updateCallerAvatar(avatarUrl: string): Promise<void>;
     updateCallerBio(bio: string): Promise<void>;
     updateCallerDisplayName(displayName: string): Promise<void>;

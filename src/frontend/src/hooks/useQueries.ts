@@ -28,6 +28,7 @@ export interface Channel {
   owner: UserId;
   createdAt: bigint;
   category?: string;
+  pinnedPostId?: ChannelPostId;
 }
 
 export interface ChannelWithMeta {
@@ -1214,5 +1215,130 @@ export function useGetStoryViewersList(statusId: StatusId | null) {
     },
     enabled: !!actor && !isFetching && statusId !== null,
     staleTime: 15000,
+  });
+}
+
+export interface StoryViewerWithAvatar {
+  username: string;
+  avatarUrl?: string;
+}
+
+export function useGetStoryViewersWithAvatars(statusId: StatusId | null) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<StoryViewerWithAvatar[]>({
+    queryKey: ["storyViewersWithAvatars", statusId?.toString()],
+    queryFn: async () => {
+      if (!actor || statusId === null) return [];
+      return actor.getStoryViewersWithAvatars(statusId);
+    },
+    enabled: !!actor && !isFetching && statusId !== null,
+    refetchInterval: 10000,
+  });
+}
+
+export function useGetUserGoldBalance() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<number>({
+    queryKey: ["analytics", "userGoldBalance"],
+    queryFn: async () => {
+      if (!actor) return 0;
+      const raw = await actor.getMyGoldBalance();
+      return Number(raw) / 100;
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+// ─── Pin / Unpin Message Hooks ────────────────────────────────────────────────
+
+export function usePinMessage(conversationId: ConversationId | null) {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (messageId: bigint) => {
+      if (!actor || conversationId === null)
+        throw new Error("Actor not available");
+      const result = await actor.pinMessage(conversationId, messageId);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+export function useUnpinMessage(conversationId: ConversationId | null) {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!actor || conversationId === null)
+        throw new Error("Actor not available");
+      const result = await actor.unpinMessage(conversationId);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+// ─── Pin / Unpin Channel Post Hooks ──────────────────────────────────────────
+
+export function usePinChannelPost(channelId: ChannelId | null) {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (postId: ChannelPostId) => {
+      if (!actor || channelId === null) throw new Error("Actor not available");
+      const result = await actor.pinChannelPost(channelId, postId);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["channel", channelId?.toString()],
+      });
+    },
+  });
+}
+
+export function useUnpinChannelPost(channelId: ChannelId | null) {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!actor || channelId === null) throw new Error("Actor not available");
+      const result = await actor.unpinChannelPost(channelId);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["channel", channelId?.toString()],
+      });
+    },
+  });
+}
+
+// ─── Typing Indicator Hook ────────────────────────────────────────────────────
+
+export function useGetTypingUsers(convId: bigint | null) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<string[]>({
+    queryKey: ["typingUsers", convId?.toString()],
+    queryFn: async () => {
+      if (!actor || convId === null) return [];
+      try {
+        return (
+          actor as ReturnType<typeof createActor> & {
+            getTypingUsers: (convId: bigint) => Promise<string[]>;
+          }
+        ).getTypingUsers(convId);
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!actor && !isFetching && convId !== null,
+    refetchInterval: 3000,
   });
 }

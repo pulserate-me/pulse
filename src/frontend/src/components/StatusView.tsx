@@ -2,7 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useActor } from "@caffeineai/core-infrastructure";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Eye,
   Heart,
@@ -24,6 +24,7 @@ import {
   useGetAllStories,
   useGetMyStatuses,
   useGetStatusInteractions,
+  useGetStoryViewersWithAvatars,
   useLikeStatus,
   useUnlikeStatus,
 } from "../hooks/useQueries";
@@ -32,21 +33,6 @@ import UserProfileModal from "./UserProfileModal";
 
 // ─── Story Viewers panel ─────────────────────────────────────────────────────
 
-function useGetStoryViewers(statusId: StatusId | null) {
-  const { actor, isFetching } = useActor(createActor);
-  return useQuery<string[]>({
-    queryKey: ["storyViewers", statusId?.toString()],
-    queryFn: async () => {
-      if (!actor || statusId === null) return [];
-      return (actor as ReturnType<typeof createActor>).getStoryViewers(
-        statusId,
-      );
-    },
-    enabled: !!actor && !isFetching && statusId !== null,
-    staleTime: 15000,
-  });
-}
-
 function StoryViewersPanel({
   statusId,
   onClose,
@@ -54,17 +40,19 @@ function StoryViewersPanel({
   statusId: StatusId;
   onClose: () => void;
 }) {
-  const { data: viewers = [], isLoading } = useGetStoryViewers(statusId);
+  const { data: viewers = [], isLoading } =
+    useGetStoryViewersWithAvatars(statusId);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 20 }}
-      className="absolute bottom-0 left-0 right-0 z-40 rounded-t-2xl flex flex-col max-h-64"
+      className="fixed bottom-0 left-1/2 -translate-x-1/2 z-[60] rounded-t-2xl flex flex-col w-full max-w-md"
       style={{
         background: "oklch(0.10 0.006 55)",
         border: "1px solid oklch(0.22 0.008 55 / 0.8)",
+        maxHeight: "40vh",
       }}
       data-ocid="status.viewers_panel"
     >
@@ -104,21 +92,31 @@ function StoryViewersPanel({
           </div>
         ) : (
           <div className="flex flex-col">
-            {viewers.map((username) => (
+            {viewers.map((viewer) => (
               <div
-                key={username}
+                key={viewer.username}
                 className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 last:border-0"
               >
-                <div
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                  style={{
-                    background: "oklch(0.76 0.13 72 / 0.2)",
-                    color: "oklch(0.82 0.15 72)",
-                  }}
-                >
-                  {username.slice(0, 1).toUpperCase()}
-                </div>
-                <span className="text-sm text-white/80">@{username}</span>
+                {viewer.avatarUrl ? (
+                  <img
+                    src={viewer.avatarUrl}
+                    alt={viewer.username}
+                    className="w-7 h-7 rounded-full object-cover shrink-0"
+                  />
+                ) : (
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
+                    style={{
+                      background: "oklch(0.76 0.13 72 / 0.2)",
+                      color: "oklch(0.82 0.15 72)",
+                    }}
+                  >
+                    {viewer.username.slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <span className="text-sm text-white/80">
+                  @{viewer.username}
+                </span>
               </div>
             ))}
           </div>
@@ -506,13 +504,24 @@ function StatusViewer({
         className="shrink-0 z-30 px-4 pb-4 pt-2 flex flex-col gap-2 relative"
         style={{ background: "oklch(0.05 0.005 55 / 0.9)" }}
       >
-        {/* Story viewers panel (own stories only) */}
+        {/* Story viewers panel (own stories only) — fixed overlay, works on all screen sizes */}
         <AnimatePresence>
           {showViewers && isOwnStatus && (
-            <StoryViewersPanel
-              statusId={status.id}
-              onClose={() => setShowViewers(false)}
-            />
+            <>
+              {/* Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[59]"
+                style={{ background: "oklch(0.0 0 0 / 0.4)" }}
+                onClick={() => setShowViewers(false)}
+              />
+              <StoryViewersPanel
+                statusId={status.id}
+                onClose={() => setShowViewers(false)}
+              />
+            </>
           )}
         </AnimatePresence>
 
@@ -646,12 +655,14 @@ interface StatusViewProps {
   currentUserId: string;
   currentProfile: UserProfile | null;
   onStartChat?: (userId: string) => void;
+  onSelectChannel?: (id: import("../hooks/useQueries").ChannelId) => void;
 }
 
 export default function StatusView({
   currentUserId,
   currentProfile,
   onStartChat,
+  onSelectChannel,
 }: StatusViewProps) {
   const [addStatusOpen, setAddStatusOpen] = useState(false);
   const [viewingUser, setViewingUser] = useState<{
@@ -871,6 +882,14 @@ export default function StatusView({
           setProfileViewOpen(false);
           onStartChat?.(userId);
         }}
+        onSelectChannel={
+          onSelectChannel
+            ? (id) => {
+                setProfileViewOpen(false);
+                onSelectChannel(id);
+              }
+            : undefined
+        }
         currentUserId={currentUserId}
       />
 

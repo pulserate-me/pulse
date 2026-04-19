@@ -65,6 +65,7 @@ export const Channel = IDL.Record({
   'description' : IDL.Text,
   'avatarUrl' : IDL.Opt(IDL.Text),
   'category' : IDL.Opt(IDL.Text),
+  'pinnedPostId' : IDL.Opt(ChannelPostId),
 });
 export const ChannelWithMeta = IDL.Record({
   'ownerProfile' : UserProfile,
@@ -129,6 +130,7 @@ export const Conversation = IDL.Record({
   'members' : IDL.Vec(UserId),
   'messages' : IDL.Vec(Message),
   'type' : ConversationType,
+  'pinnedMessageId' : IDL.Opt(MessageId),
 });
 export const GoldTxId = IDL.Nat;
 export const GoldTxType = IDL.Variant({
@@ -346,11 +348,21 @@ export const idlService = IDL.Service({
     ),
   'getStoryViewers' : IDL.Func([StatusId], [IDL.Vec(IDL.Text)], ['query']),
   'getStoryViewersList' : IDL.Func([StatusId], [IDL.Vec(IDL.Text)], ['query']),
+  'getStoryViewersWithAvatars' : IDL.Func(
+      [StatusId],
+      [
+        IDL.Vec(
+          IDL.Record({ 'username' : IDL.Text, 'avatarUrl' : IDL.Opt(IDL.Text) })
+        ),
+      ],
+      ['query'],
+    ),
   'getTotalChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
   'getTotalGoldVolume' : IDL.Func([], [IDL.Float64], ['query']),
   'getTotalMessagesCount' : IDL.Func([], [IDL.Nat], ['query']),
   'getTotalStoriesPosted' : IDL.Func([], [IDL.Nat], ['query']),
   'getTotalUsers' : IDL.Func([], [IDL.Nat], ['query']),
+  'getTypingUsers' : IDL.Func([ConversationId], [IDL.Vec(IDL.Text)], ['query']),
   'getUnreadCount' : IDL.Func([ConversationId], [IDL.Nat], ['query']),
   'getUserByPrincipal' : IDL.Func([UserId], [IDL.Opt(UserProfile)], ['query']),
   'getUserChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
@@ -373,6 +385,16 @@ export const idlService = IDL.Service({
   'markAsRead' : IDL.Func([ConversationId], [], []),
   'markMessagesAsRead' : IDL.Func([ConversationId], [], []),
   'markNotificationsRead' : IDL.Func([], [], []),
+  'pinChannelPost' : IDL.Func(
+      [ChannelId, ChannelPostId],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'pinMessage' : IDL.Func(
+      [ConversationId, MessageId],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'recordStoryView' : IDL.Func([StatusId], [], []),
   'removeFromHighlights' : IDL.Func(
       [StatusId],
@@ -400,11 +422,22 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'sendMessage' : IDL.Func([ConversationId, MessageInput], [MessageId], []),
+  'setTypingStatus' : IDL.Func([ConversationId, IDL.Bool], [], []),
   'transferGold' : IDL.Func([IDL.Text, IDL.Nat], [], []),
   'unblockUser' : IDL.Func([UserId], [], []),
   'unfollowChannel' : IDL.Func([ChannelId], [], []),
   'unlikeChannelPost' : IDL.Func([ChannelPostId], [], []),
   'unlikeStatus' : IDL.Func([StatusId], [], []),
+  'unpinChannelPost' : IDL.Func(
+      [ChannelId],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'unpinMessage' : IDL.Func(
+      [ConversationId],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'updateCallerAvatar' : IDL.Func([IDL.Text], [], []),
   'updateCallerBio' : IDL.Func([IDL.Text], [], []),
   'updateCallerDisplayName' : IDL.Func([IDL.Text], [], []),
@@ -478,6 +511,7 @@ export const idlFactory = ({ IDL }) => {
     'description' : IDL.Text,
     'avatarUrl' : IDL.Opt(IDL.Text),
     'category' : IDL.Opt(IDL.Text),
+    'pinnedPostId' : IDL.Opt(ChannelPostId),
   });
   const ChannelWithMeta = IDL.Record({
     'ownerProfile' : UserProfile,
@@ -542,6 +576,7 @@ export const idlFactory = ({ IDL }) => {
     'members' : IDL.Vec(UserId),
     'messages' : IDL.Vec(Message),
     'type' : ConversationType,
+    'pinnedMessageId' : IDL.Opt(MessageId),
   });
   const GoldTxId = IDL.Nat;
   const GoldTxType = IDL.Variant({
@@ -777,11 +812,28 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(IDL.Text)],
         ['query'],
       ),
+    'getStoryViewersWithAvatars' : IDL.Func(
+        [StatusId],
+        [
+          IDL.Vec(
+            IDL.Record({
+              'username' : IDL.Text,
+              'avatarUrl' : IDL.Opt(IDL.Text),
+            })
+          ),
+        ],
+        ['query'],
+      ),
     'getTotalChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
     'getTotalGoldVolume' : IDL.Func([], [IDL.Float64], ['query']),
     'getTotalMessagesCount' : IDL.Func([], [IDL.Nat], ['query']),
     'getTotalStoriesPosted' : IDL.Func([], [IDL.Nat], ['query']),
     'getTotalUsers' : IDL.Func([], [IDL.Nat], ['query']),
+    'getTypingUsers' : IDL.Func(
+        [ConversationId],
+        [IDL.Vec(IDL.Text)],
+        ['query'],
+      ),
     'getUnreadCount' : IDL.Func([ConversationId], [IDL.Nat], ['query']),
     'getUserByPrincipal' : IDL.Func(
         [UserId],
@@ -808,6 +860,16 @@ export const idlFactory = ({ IDL }) => {
     'markAsRead' : IDL.Func([ConversationId], [], []),
     'markMessagesAsRead' : IDL.Func([ConversationId], [], []),
     'markNotificationsRead' : IDL.Func([], [], []),
+    'pinChannelPost' : IDL.Func(
+        [ChannelId, ChannelPostId],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'pinMessage' : IDL.Func(
+        [ConversationId, MessageId],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'recordStoryView' : IDL.Func([StatusId], [], []),
     'removeFromHighlights' : IDL.Func(
         [StatusId],
@@ -835,11 +897,22 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'sendMessage' : IDL.Func([ConversationId, MessageInput], [MessageId], []),
+    'setTypingStatus' : IDL.Func([ConversationId, IDL.Bool], [], []),
     'transferGold' : IDL.Func([IDL.Text, IDL.Nat], [], []),
     'unblockUser' : IDL.Func([UserId], [], []),
     'unfollowChannel' : IDL.Func([ChannelId], [], []),
     'unlikeChannelPost' : IDL.Func([ChannelPostId], [], []),
     'unlikeStatus' : IDL.Func([StatusId], [], []),
+    'unpinChannelPost' : IDL.Func(
+        [ChannelId],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'unpinMessage' : IDL.Func(
+        [ConversationId],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'updateCallerAvatar' : IDL.Func([IDL.Text], [], []),
     'updateCallerBio' : IDL.Func([IDL.Text], [], []),
     'updateCallerDisplayName' : IDL.Func([IDL.Text], [], []),

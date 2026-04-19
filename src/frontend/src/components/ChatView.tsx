@@ -41,7 +41,10 @@ import {
   MoreVertical,
   Paperclip,
   Pencil,
+  Pin,
+  PinOff,
   Reply,
+  Search,
   Send,
   Share2,
   Shield,
@@ -75,15 +78,18 @@ import {
   useGetMessages,
   useGetMyBlockedUsers,
   useGetMyGoldBalance,
+  useGetTypingUsers,
   useGetUserProfile,
   useIsUserOnline,
   useLeaveConversation,
   useListUserConversations,
   useMarkMessagesAsRead,
+  usePinMessage,
   useRemoveGroupMember,
   useSendMessage,
   useTransferGold,
   useUnblockUser,
+  useUnpinMessage,
   useUpdateGroupAvatar,
 } from "../hooks/useQueries";
 import UserProfileModal from "./UserProfileModal";
@@ -214,10 +220,12 @@ function MediaMessage({ url, mediaType, onImageClick }: MediaMessageProps) {
 function ForwardMessagePicker({
   conversations,
   currentUserId,
+  groupAvatarMap,
   onSelect,
 }: {
   conversations: Conversation[];
   currentUserId: string;
+  groupAvatarMap: Map<string, string>;
   onSelect: (convId: ConversationId) => void;
 }) {
   return (
@@ -239,6 +247,9 @@ function ForwardMessagePicker({
               convName={convName}
               currentUserId={currentUserId}
               isGroupConv={isGroupConv}
+              groupAvatarUrl={
+                isGroupConv ? groupAvatarMap.get(conv.id.toString()) : undefined
+              }
               onSelect={() => onSelect(conv.id)}
             />
           );
@@ -253,12 +264,14 @@ function ForwardConvRow({
   convName,
   currentUserId,
   isGroupConv,
+  groupAvatarUrl,
   onSelect,
 }: {
   conversation: Conversation;
   convName: string | null;
   currentUserId: string;
   isGroupConv: boolean;
+  groupAvatarUrl?: string;
   onSelect: () => void;
 }) {
   const otherUserId = isGroupConv
@@ -276,9 +289,11 @@ function ForwardConvRow({
       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-muted/50 transition-colors text-left"
     >
       <Avatar className="w-9 h-9 shrink-0">
-        {otherProfile?.avatarUrl && (
+        {isGroupConv && groupAvatarUrl ? (
+          <AvatarImage src={groupAvatarUrl} alt={displayName} />
+        ) : !isGroupConv && otherProfile?.avatarUrl ? (
           <AvatarImage src={otherProfile.avatarUrl} alt={displayName} />
-        )}
+        ) : null}
         <AvatarFallback
           className="text-xs"
           style={{
@@ -496,11 +511,16 @@ interface MessageBubbleProps {
     mediaType?: string;
   }) => void;
   onReply?: (message: Message) => void;
+  onPin?: (messageId: MessageId) => void;
+  onUnpin?: () => void;
+  pinnedMessageId?: MessageId | null;
   index: number;
   conversationId: ConversationId;
   // Optimistic reactions state managed by parent
   localReactions: string[];
   onToggleReaction: (messageId: MessageId) => void;
+  /** Lowercase search term for highlighting. Empty string = no highlight. */
+  searchHighlight?: string;
 }
 
 function MessageBubble({
@@ -513,13 +533,19 @@ function MessageBubble({
   onSenderClick,
   onForward,
   onReply,
+  onPin,
+  onUnpin,
+  pinnedMessageId,
   index,
   conversationId,
   localReactions,
   onToggleReaction,
+  searchHighlight = "",
 }: MessageBubbleProps) {
   const isSent = message.sender.toString() === currentUserId;
   const senderId = message.sender.toString();
+  const isThisPinned =
+    pinnedMessageId != null && pinnedMessageId === message.id;
   const { data: senderProfile } = useGetUserProfile(
     isGroup && !isSent ? senderId : null,
   );
@@ -529,6 +555,29 @@ function MessageBubble({
   const [editText, setEditText] = useState(message.content.text ?? "");
   const editMessage = useEditMessage(conversationId);
   const deleteMessage = useDeleteMessage(conversationId);
+
+  // Highlight matching text for search
+  const renderText = (raw: string) => {
+    if (!searchHighlight || !raw) return raw;
+    const idx = raw.toLowerCase().indexOf(searchHighlight);
+    if (idx === -1) return raw;
+    return (
+      <>
+        {raw.slice(0, idx)}
+        <mark
+          style={{
+            background: "oklch(0.82 0.15 72 / 0.35)",
+            color: "inherit",
+            borderRadius: "2px",
+            padding: "0 1px",
+          }}
+        >
+          {raw.slice(idx, idx + searchHighlight.length)}
+        </mark>
+        {raw.slice(idx + searchHighlight.length)}
+      </>
+    );
+  };
 
   // Touch handling for long-press → reply
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -642,7 +691,7 @@ function MessageBubble({
             ))}
           {message.content.text && !isEditing && (
             <p className="text-sm text-foreground leading-relaxed break-words">
-              {message.content.text}
+              {renderText(message.content.text)}
             </p>
           )}
           <div
@@ -740,6 +789,29 @@ function MessageBubble({
               aria-label="Forward message"
             >
               <Share2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+
+          {/* Pin button — visible on hover for all users */}
+          {(hovered || menuOpen) && (onPin || onUnpin) && (
+            <button
+              type="button"
+              data-ocid={`chat.message.pin_button.${index + 1}`}
+              onClick={() => {
+                if (isThisPinned && onUnpin) {
+                  onUnpin();
+                } else if (!isThisPinned && onPin) {
+                  onPin(message.id);
+                }
+              }}
+              className="p-1.5 rounded-lg hover:bg-muted/60 transition-colors text-muted-foreground hover:text-foreground shrink-0 self-center"
+              aria-label={isThisPinned ? "Unpin message" : "Pin message"}
+            >
+              {isThisPinned ? (
+                <PinOff className="h-3.5 w-3.5" />
+              ) : (
+                <Pin className="h-3.5 w-3.5" />
+              )}
             </button>
           )}
 
@@ -994,6 +1066,10 @@ export default function ChatView({
   const [visibleMsgCount, setVisibleMsgCount] = useState(19);
   const [visibleMembersCount, setVisibleMembersCount] = useState(19);
 
+  // In-conversation search state
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
+
   // Reply threading state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
 
@@ -1008,6 +1084,7 @@ export default function ChatView({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: messages = [] } = useGetMessages(conversationId);
   const { data: conversations } = useListUserConversations();
@@ -1026,6 +1103,8 @@ export default function ChatView({
   const { data: groupCreators } = useGetGroupCreators();
   const addGroupMember = useAddGroupMember();
   const removeGroupMember = useRemoveGroupMember();
+  const pinMessage = usePinMessage(conversationId);
+  const unpinMessage = useUnpinMessage(conversationId);
   const groupAvatarMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const [id, url] of groupAvatarsData ?? []) {
@@ -1037,6 +1116,7 @@ export default function ChatView({
     ? groupAvatarMap.get(conversationId.toString())
     : undefined;
   const { actor } = useActor(createActor);
+  const { data: typingUsers = [] } = useGetTypingUsers(conversationId);
   const isGroupOwner = !!groupCreators?.find(
     ([cid, creatorId]) =>
       cid.toString() === conversationId?.toString() &&
@@ -1069,6 +1149,23 @@ export default function ChatView({
     ? (conversation?.members
         .find((m) => m.toString() !== currentUserId)
         ?.toString() ?? null)
+    : null;
+
+  // Pinned message ID — handle both Candid [] | [bigint] and plain bigint shapes
+  const rawPinned = conversation?.pinnedMessageId as
+    | ([] | [bigint])
+    | bigint
+    | undefined;
+  const pinnedMessageId: bigint | null =
+    rawPinned == null
+      ? null
+      : Array.isArray(rawPinned)
+        ? rawPinned.length > 0
+          ? (rawPinned[0] ?? null)
+          : null
+        : rawPinned;
+  const pinnedMessage = pinnedMessageId
+    ? (messages.find((m) => m.id === pinnedMessageId) ?? null)
     : null;
 
   const { data: otherProfile } = useGetUserProfile(otherUserId);
@@ -1165,6 +1262,8 @@ export default function ChatView({
     setVisibleMsgCount(19);
     setReplyingTo(null);
     setLocalReactionMap({});
+    setChatSearchOpen(false);
+    setChatSearchQuery("");
   }, [conversationId]);
 
   useEffect(() => {
@@ -1220,6 +1319,23 @@ export default function ChatView({
 
   const handleSend = async () => {
     if (!text.trim() && !pendingFile) return;
+
+    // Clear typing indicator
+    if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
+    if (actor && conversationId !== null) {
+      try {
+        await (
+          actor as ReturnType<typeof createActor> & {
+            setTypingStatus: (
+              convId: bigint,
+              isTyping: boolean,
+            ) => Promise<void>;
+          }
+        ).setTypingStatus(conversationId, false);
+      } catch {
+        // best-effort
+      }
+    }
 
     let mediaUrl: string | undefined;
     let mediaType: MediaType | undefined;
@@ -1478,6 +1594,22 @@ export default function ChatView({
             </p>
           )}
         </div>
+
+        {/* In-chat search button */}
+        <Button
+          data-ocid="chat.search_button"
+          size="icon"
+          variant="ghost"
+          onClick={() => {
+            setChatSearchOpen((v) => !v);
+            if (chatSearchOpen) setChatSearchQuery("");
+          }}
+          className="h-9 w-9 rounded-xl hover:bg-muted shrink-0"
+          aria-label="Search in conversation"
+          style={chatSearchOpen ? { color: "oklch(0.82 0.15 72)" } : undefined}
+        >
+          <Search className="h-4 w-4" />
+        </Button>
 
         {/* Three-dot menu */}
         <DropdownMenu>
@@ -1750,6 +1882,123 @@ export default function ChatView({
           </DialogContent>
         </Dialog>
       </div>
+      {/* End header */}
+
+      {/* Pinned message banner */}
+      <AnimatePresence>
+        {pinnedMessage && (
+          <motion.div
+            key="pinned-banner"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            data-ocid="chat.pinned_message_banner"
+            className="shrink-0 border-b border-border overflow-hidden"
+            style={{ background: "oklch(0.13 0.025 65)" }}
+          >
+            <div className="relative">
+              <button
+                type="button"
+                className="w-full flex items-center gap-2 px-4 py-2 pr-10 text-left hover:bg-muted/20 transition-colors"
+                onClick={() => {
+                  const el = document.querySelector(
+                    `[data-ocid="chat.message.${messages.indexOf(pinnedMessage) + 1}"]`,
+                  );
+                  el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
+                aria-label="Go to pinned message"
+              >
+                <Pin
+                  className="h-3.5 w-3.5 shrink-0"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                />
+                <div className="flex-1 min-w-0">
+                  <span
+                    className="text-[10px] font-semibold uppercase tracking-wider block"
+                    style={{ color: "oklch(0.82 0.15 72)" }}
+                  >
+                    Pinned message
+                  </span>
+                  <span className="text-xs text-muted-foreground truncate block">
+                    {pinnedMessage.content.mediaUrl
+                      ? "📎 Media"
+                      : (pinnedMessage.content.text?.slice(0, 60) ?? "")}
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                data-ocid="chat.pinned_message.unpin_button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  unpinMessage.mutate(undefined, {
+                    onError: () => toast.error("Failed to unpin message"),
+                  });
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground"
+                aria-label="Unpin message"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* In-conversation search bar */}
+      <AnimatePresence>
+        {chatSearchOpen && (
+          <motion.div
+            key="chat-search-bar"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="shrink-0 border-b border-border overflow-hidden"
+            style={{ background: "oklch(0.11 0.015 55)" }}
+          >
+            <div className="flex items-center gap-2 px-4 py-2">
+              <Search className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
+              <input
+                data-ocid="chat.search_input"
+                // biome-ignore lint/a11y/noAutofocus: intentional for search UX
+                autoFocus
+                value={chatSearchQuery}
+                onChange={(e) => setChatSearchQuery(e.target.value)}
+                placeholder="Search in conversation…"
+                className="flex-1 bg-transparent text-sm outline-none text-foreground placeholder:text-muted-foreground/50"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setChatSearchOpen(false);
+                    setChatSearchQuery("");
+                  }
+                }}
+              />
+              {chatSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setChatSearchQuery("")}
+                  className="text-muted-foreground/60 hover:text-muted-foreground transition-colors shrink-0"
+                  aria-label="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <button
+                type="button"
+                data-ocid="chat.search_close_button"
+                onClick={() => {
+                  setChatSearchOpen(false);
+                  setChatSearchQuery("");
+                }}
+                className="text-muted-foreground/60 hover:text-muted-foreground transition-colors shrink-0 ml-1"
+                aria-label="Close search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Messages */}
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
@@ -1761,56 +2010,101 @@ export default function ChatView({
               </p>
             </div>
           ) : (
-            <>
-              {messages.length > visibleMsgCount && (
-                <div className="flex justify-center py-2">
-                  <button
-                    data-ocid="chat.view_more_messages.button"
-                    type="button"
-                    onClick={() => setVisibleMsgCount((prev) => prev + 19)}
-                    className="text-xs px-3 py-1 rounded-full transition-colors hover:opacity-80"
-                    style={{
-                      color: "oklch(0.82 0.15 72)",
-                      background: "oklch(0.82 0.15 72 / 0.1)",
-                    }}
-                  >
-                    View more
-                  </button>
-                </div>
-              )}
-              {messages.slice(-visibleMsgCount).map((msg) => {
-                const idx = messages.indexOf(msg);
-                const prevMsg = idx > 0 ? messages[idx - 1] : null;
-                const showSender =
-                  !prevMsg ||
-                  prevMsg.sender.toString() !== msg.sender.toString();
-                const msgKey = msg.id.toString();
-                const localReactions =
-                  localReactionMap[msgKey] ??
-                  msg.reactions.map((r) => r.toString());
+            (() => {
+              // Apply search filter if active
+              const searchActive = chatSearchQuery.trim().length > 0;
+              const qLow = chatSearchQuery.toLowerCase();
+              const matchedMessages = searchActive
+                ? messages.filter((m) =>
+                    m.content.text.toLowerCase().includes(qLow),
+                  )
+                : messages;
+
+              if (searchActive && matchedMessages.length === 0) {
                 return (
-                  <MessageBubble
-                    key={msgKey}
-                    message={msg}
-                    currentUserId={currentUserId}
-                    memberCount={memberCount}
-                    isGroup={!!isGroup}
-                    showSender={showSender}
-                    onImageClick={setLightboxUrl}
-                    onSenderClick={(id) => setSenderProfileId(id)}
-                    onForward={(msgContent) => {
-                      setForwardMsgContent(msgContent);
-                      setForwardMsgOpen(true);
-                    }}
-                    onReply={(m) => setReplyingTo(m)}
-                    index={idx}
-                    conversationId={conversationId}
-                    localReactions={localReactions}
-                    onToggleReaction={handleToggleReaction}
-                  />
+                  <div
+                    data-ocid="chat.search.empty_state"
+                    className="flex flex-col items-center justify-center py-16 text-center"
+                  >
+                    <Search className="h-8 w-8 text-muted-foreground/30 mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      No messages found for &quot;{chatSearchQuery}&quot;
+                    </p>
+                  </div>
                 );
-              })}
-            </>
+              }
+
+              const slicedMessages = searchActive
+                ? matchedMessages
+                : matchedMessages.slice(-visibleMsgCount);
+
+              return (
+                <>
+                  {!searchActive && messages.length > visibleMsgCount && (
+                    <div className="flex justify-center py-2">
+                      <button
+                        data-ocid="chat.view_more_messages.button"
+                        type="button"
+                        onClick={() => setVisibleMsgCount((prev) => prev + 19)}
+                        className="text-xs px-3 py-1 rounded-full transition-colors hover:opacity-80"
+                        style={{
+                          color: "oklch(0.82 0.15 72)",
+                          background: "oklch(0.82 0.15 72 / 0.1)",
+                        }}
+                      >
+                        View more
+                      </button>
+                    </div>
+                  )}
+                  {slicedMessages.map((msg) => {
+                    const idx = messages.indexOf(msg);
+                    const prevMsg = idx > 0 ? messages[idx - 1] : null;
+                    const showSender =
+                      !prevMsg ||
+                      prevMsg.sender.toString() !== msg.sender.toString();
+                    const msgKey = msg.id.toString();
+                    const localReactions =
+                      localReactionMap[msgKey] ??
+                      msg.reactions.map((r) => r.toString());
+
+                    return (
+                      <MessageBubble
+                        key={msgKey}
+                        message={msg}
+                        currentUserId={currentUserId}
+                        memberCount={memberCount}
+                        isGroup={!!isGroup}
+                        showSender={showSender}
+                        onImageClick={setLightboxUrl}
+                        onSenderClick={(id) => setSenderProfileId(id)}
+                        onForward={(msgContent) => {
+                          setForwardMsgContent(msgContent);
+                          setForwardMsgOpen(true);
+                        }}
+                        onReply={(m) => setReplyingTo(m)}
+                        onPin={(messageId) =>
+                          pinMessage.mutate(messageId, {
+                            onError: () => toast.error("Failed to pin message"),
+                          })
+                        }
+                        onUnpin={() =>
+                          unpinMessage.mutate(undefined, {
+                            onError: () =>
+                              toast.error("Failed to unpin message"),
+                          })
+                        }
+                        pinnedMessageId={pinnedMessageId}
+                        index={idx}
+                        conversationId={conversationId}
+                        localReactions={localReactions}
+                        onToggleReaction={handleToggleReaction}
+                        searchHighlight={searchActive ? qLow : ""}
+                      />
+                    );
+                  })}
+                </>
+              );
+            })()
           )}
           <div ref={bottomRef} />
         </div>
@@ -1924,6 +2218,38 @@ export default function ChatView({
         )}
       </AnimatePresence>
 
+      {/* Typing indicator */}
+      {typingUsers.length > 0 && (
+        <div
+          data-ocid="chat.typing_indicator"
+          className="px-4 py-1.5 shrink-0 flex items-center gap-2"
+        >
+          <span
+            className="text-xs"
+            style={{ color: "oklch(0.82 0.15 72 / 0.75)" }}
+          >
+            {typingUsers.length === 1
+              ? `${typingUsers[0]} is typing`
+              : typingUsers.length === 2
+                ? `${typingUsers[0]} and ${typingUsers[1]} are typing`
+                : "Several people are typing"}
+          </span>
+          <span className="flex items-center gap-0.5" aria-hidden="true">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="inline-block w-1 h-1 rounded-full"
+                style={{
+                  background: "oklch(0.82 0.15 72 / 0.7)",
+                  animation: "typingDot 1.2s ease-in-out infinite",
+                  animationDelay: `${i * 0.2}s`,
+                }}
+              />
+            ))}
+          </span>
+        </div>
+      )}
+
       {/* Input area */}
       <div
         className="px-4 py-3 border-t border-border bg-sidebar shrink-0"
@@ -2029,7 +2355,40 @@ export default function ChatView({
                 data-ocid="chat.message_input"
                 placeholder={replyingTo ? "Type a reply..." : "Message..."}
                 value={text}
-                onChange={(e) => setText(e.target.value)}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  // Typing indicator: set active, debounce clear after 4s
+                  if (actor && conversationId !== null) {
+                    try {
+                      (
+                        actor as ReturnType<typeof createActor> & {
+                          setTypingStatus: (
+                            convId: bigint,
+                            isTyping: boolean,
+                          ) => Promise<void>;
+                        }
+                      ).setTypingStatus(conversationId, true);
+                    } catch {
+                      // best-effort
+                    }
+                    if (typingDebounceRef.current)
+                      clearTimeout(typingDebounceRef.current);
+                    typingDebounceRef.current = setTimeout(() => {
+                      try {
+                        (
+                          actor as ReturnType<typeof createActor> & {
+                            setTypingStatus: (
+                              convId: bigint,
+                              isTyping: boolean,
+                            ) => Promise<void>;
+                          }
+                        ).setTypingStatus(conversationId, false);
+                      } catch {
+                        // best-effort
+                      }
+                    }, 4000);
+                  }
+                }}
                 onKeyDown={handleKeyDown}
                 disabled={isUploading || sending}
                 className="flex-1 bg-input border-border h-10 rounded-xl"
@@ -2227,6 +2586,7 @@ export default function ChatView({
           <ForwardMessagePicker
             conversations={conversations ?? []}
             currentUserId={currentUserId}
+            groupAvatarMap={groupAvatarMap}
             onSelect={async (convId) => {
               if (!forwardMsgContent) return;
               try {

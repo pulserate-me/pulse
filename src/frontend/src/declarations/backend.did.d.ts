@@ -24,6 +24,7 @@ export interface Channel {
   'description' : string,
   'avatarUrl' : [] | [string],
   'category' : [] | [string],
+  'pinnedPostId' : [] | [ChannelPostId],
 }
 export type ChannelCommentId = bigint;
 export interface ChannelCommentWithProfile {
@@ -64,6 +65,7 @@ export interface Conversation {
   'members' : Array<UserId>,
   'messages' : Array<Message>,
   'type' : ConversationType,
+  'pinnedMessageId' : [] | [MessageId],
 }
 export type ConversationId = bigint;
 export type ConversationType = { 'group' : string } |
@@ -287,11 +289,16 @@ export interface _SERVICE {
   'getStatusInteractions' : ActorMethod<[StatusId], StatusInteractions>,
   'getStoryViewers' : ActorMethod<[StatusId], Array<string>>,
   'getStoryViewersList' : ActorMethod<[StatusId], Array<string>>,
+  'getStoryViewersWithAvatars' : ActorMethod<
+    [StatusId],
+    Array<{ 'username' : string, 'avatarUrl' : [] | [string] }>
+  >,
   'getTotalChannelsCreated' : ActorMethod<[], bigint>,
   'getTotalGoldVolume' : ActorMethod<[], number>,
   'getTotalMessagesCount' : ActorMethod<[], bigint>,
   'getTotalStoriesPosted' : ActorMethod<[], bigint>,
   'getTotalUsers' : ActorMethod<[], bigint>,
+  'getTypingUsers' : ActorMethod<[ConversationId], Array<string>>,
   'getUnreadCount' : ActorMethod<[ConversationId], bigint>,
   'getUserByPrincipal' : ActorMethod<[UserId], [] | [UserProfile]>,
   'getUserChannelsCreated' : ActorMethod<[], bigint>,
@@ -310,6 +317,25 @@ export interface _SERVICE {
   'markAsRead' : ActorMethod<[ConversationId], undefined>,
   'markMessagesAsRead' : ActorMethod<[ConversationId], undefined>,
   'markNotificationsRead' : ActorMethod<[], undefined>,
+  /**
+   * / Pin a post in a channel.
+   * / Only the channel owner may pin.
+   */
+  'pinChannelPost' : ActorMethod<
+    [ChannelId, ChannelPostId],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
+  /**
+   * / Pin a message in a conversation or group.
+   * / - Direct conversations: any member may pin.
+   * / - Group conversations: only the group owner (creator) may pin.
+   */
+  'pinMessage' : ActorMethod<
+    [ConversationId, MessageId],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'recordStoryView' : ActorMethod<[StatusId], undefined>,
   'removeFromHighlights' : ActorMethod<
     [StatusId],
@@ -335,11 +361,30 @@ export interface _SERVICE {
     Array<{ 'userId' : UserId, 'profile' : UserProfile }>
   >,
   'sendMessage' : ActorMethod<[ConversationId, MessageInput], MessageId>,
+  'setTypingStatus' : ActorMethod<[ConversationId, boolean], undefined>,
   'transferGold' : ActorMethod<[string, bigint], undefined>,
   'unblockUser' : ActorMethod<[UserId], undefined>,
   'unfollowChannel' : ActorMethod<[ChannelId], undefined>,
   'unlikeChannelPost' : ActorMethod<[ChannelPostId], undefined>,
   'unlikeStatus' : ActorMethod<[StatusId], undefined>,
+  /**
+   * / Remove the pinned post from a channel.
+   * / Only the channel owner may unpin.
+   */
+  'unpinChannelPost' : ActorMethod<
+    [ChannelId],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
+  /**
+   * / Remove the pinned message from a conversation.
+   * / Any conversation member may unpin.
+   */
+  'unpinMessage' : ActorMethod<
+    [ConversationId],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'updateCallerAvatar' : ActorMethod<[string], undefined>,
   'updateCallerBio' : ActorMethod<[string], undefined>,
   'updateCallerDisplayName' : ActorMethod<[string], undefined>,
