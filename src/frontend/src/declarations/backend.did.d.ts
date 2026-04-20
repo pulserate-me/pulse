@@ -49,6 +49,7 @@ export interface ChannelPostContent {
 export type ChannelPostId = bigint;
 export interface ChannelPostInteractions {
   'likeCount' : bigint,
+  'viewCount' : bigint,
   'comments' : Array<ChannelCommentWithProfile>,
   'likedByMe' : boolean,
 }
@@ -306,6 +307,16 @@ export interface _SERVICE {
   'getUserProfile' : ActorMethod<[UserId], [] | [UserProfile]>,
   'getUserStoriesPosted' : ActorMethod<[], bigint>,
   'getUsersWithGoldAbove' : ActorMethod<[bigint], Array<DealerInfo>>,
+  'giftGoldToPost' : ActorMethod<
+    [ChannelPostId, bigint],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
+  'giftGoldToStory' : ActorMethod<
+    [StatusId, bigint],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'isBlockedBy' : ActorMethod<[UserId], boolean>,
   'isCallerAdmin' : ActorMethod<[], boolean>,
   'isHighlighted' : ActorMethod<[StatusId], boolean>,
@@ -336,6 +347,7 @@ export interface _SERVICE {
     { 'ok' : null } |
       { 'err' : string }
   >,
+  'recordChannelPostView' : ActorMethod<[ChannelPostId], undefined>,
   'recordStoryView' : ActorMethod<[StatusId], undefined>,
   'removeFromHighlights' : ActorMethod<
     [StatusId],

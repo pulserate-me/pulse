@@ -1,9 +1,16 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useActor } from "@caffeineai/core-infrastructure";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  Coins,
   Eye,
   Heart,
   Loader2,
@@ -22,9 +29,11 @@ import type { StatusId } from "../backend";
 import {
   useCommentOnStatus,
   useGetAllStories,
+  useGetMyGoldBalance,
   useGetMyStatuses,
   useGetStatusInteractions,
   useGetStoryViewersWithAvatars,
+  useGiftGoldToStory,
   useLikeStatus,
   useUnlikeStatus,
 } from "../hooks/useQueries";
@@ -302,6 +311,9 @@ function StatusViewer({
   const [index, setIndex] = useState(0);
   const [commentText, setCommentText] = useState("");
   const [showViewers, setShowViewers] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [giftAmount, setGiftAmount] = useState("");
+  const [giftError, setGiftError] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const status = statuses[index];
@@ -311,7 +323,11 @@ function StatusViewer({
   const likeStatus = useLikeStatus();
   const unlikeStatus = useUnlikeStatus();
   const commentOnStatus = useCommentOnStatus();
+  const giftGold = useGiftGoldToStory();
+  const { data: rawBalance } = useGetMyGoldBalance();
   const { actor } = useActor(createActor);
+  const goldBalance =
+    rawBalance !== undefined ? Number(rawBalance) / 100 : null;
 
   // Record a view whenever a new story slide is shown — skip the story owner's own views
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally re-run when index/status changes
@@ -353,6 +369,30 @@ function StatusViewer({
       { statusId: status.id, text: commentText.trim() },
       { onSuccess: () => setCommentText("") },
     );
+  };
+
+  const handleGiftGold = async () => {
+    const amt = Number.parseFloat(giftAmount);
+    if (Number.isNaN(amt) || amt < 0.01) {
+      setGiftError("Minimum gift is 0.01 Gold");
+      return;
+    }
+    if (goldBalance !== null && goldBalance < amt) {
+      setGiftError("Insufficient Gold balance");
+      return;
+    }
+    setGiftError("");
+    try {
+      await giftGold.mutateAsync({
+        statusId: status.id,
+        amount: BigInt(Math.round(amt * 100)),
+      });
+      toast.success(`Gifted ${amt.toFixed(2)} Gold successfully!`);
+      setGiftOpen(false);
+      setGiftAmount("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to gift Gold");
+    }
   };
 
   const recentComments = interactions?.comments?.slice(-3) ?? [];
@@ -608,6 +648,36 @@ function StatusViewer({
             </div>
           )}
 
+          {/* Gift Gold button (non-owner only) */}
+          {!isOwnStatus && (
+            <button
+              type="button"
+              onClick={() => {
+                setGiftOpen(true);
+                setGiftAmount("");
+                setGiftError("");
+              }}
+              className="flex items-center gap-1.5 px-2 py-1.5 rounded-full transition-colors shrink-0"
+              style={{
+                background: "oklch(0.82 0.15 72 / 0.15)",
+                border: "1px solid oklch(0.82 0.15 72 / 0.35)",
+              }}
+              data-ocid="status.gift_button"
+              aria-label="Gift Gold"
+            >
+              <Coins
+                className="h-4 w-4"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              />
+              <span
+                className="text-xs font-semibold"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              >
+                Gift
+              </span>
+            </button>
+          )}
+
           {/* Comment input (non-owner only) */}
           {!isOwnStatus && (
             <>
@@ -645,6 +715,107 @@ function StatusViewer({
           </div>
         )}
       </div>
+
+      {/* Gift Gold Dialog */}
+      <Dialog
+        open={giftOpen}
+        onOpenChange={(open) => {
+          setGiftOpen(open);
+          if (!open) {
+            setGiftAmount("");
+            setGiftError("");
+          }
+        }}
+      >
+        <DialogContent
+          data-ocid="status.gift.dialog"
+          className="bg-card border-border max-w-sm"
+          style={{ zIndex: 100 }}
+        >
+          <DialogHeader>
+            <DialogTitle
+              className="font-display flex items-center gap-2"
+              style={{ color: "oklch(0.82 0.15 72)" }}
+            >
+              <Coins
+                className="h-5 w-5"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              />
+              Gift Gold
+            </DialogTitle>
+          </DialogHeader>
+          {goldBalance !== null && (
+            <p className="text-xs text-muted-foreground -mt-1">
+              Your balance:{" "}
+              <span
+                className="font-semibold"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              >
+                {goldBalance.toFixed(2)} Gold
+              </span>
+            </p>
+          )}
+          <div className="flex flex-col gap-2 mt-1">
+            <Input
+              data-ocid="status.gift.input"
+              type="number"
+              min="0.01"
+              step="0.01"
+              placeholder="0.01"
+              value={giftAmount}
+              onChange={(e) => {
+                setGiftAmount(e.target.value);
+                setGiftError("");
+              }}
+              className="bg-input border-border"
+              style={{
+                borderColor: giftError ? "oklch(0.65 0.25 25)" : undefined,
+              }}
+            />
+            {giftError && (
+              <p
+                className="text-xs"
+                style={{ color: "oklch(0.65 0.25 25)" }}
+                data-ocid="status.gift.error_state"
+              >
+                {giftError}
+              </p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-1">
+            <Button
+              variant="ghost"
+              onClick={() => setGiftOpen(false)}
+              disabled={giftGold.isPending}
+              data-ocid="status.gift.cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleGiftGold}
+              disabled={
+                giftGold.isPending ||
+                !giftAmount ||
+                Number.parseFloat(giftAmount) < 0.01 ||
+                (goldBalance !== null &&
+                  goldBalance < Number.parseFloat(giftAmount))
+              }
+              data-ocid="status.gift.submit_button"
+              style={{
+                background:
+                  "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                color: "oklch(0.08 0.004 55)",
+              }}
+            >
+              {giftGold.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Send Gold"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }

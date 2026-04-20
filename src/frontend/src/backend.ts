@@ -98,6 +98,7 @@ export interface ChannelWithMeta {
 export type Timestamp = bigint;
 export interface ChannelPostInteractions {
     likeCount: bigint;
+    viewCount: bigint;
     comments: Array<ChannelCommentWithProfile>;
     likedByMe: boolean;
 }
@@ -382,6 +383,20 @@ export interface backendInterface {
     getUserProfile(userId: UserId): Promise<UserProfile | null>;
     getUserStoriesPosted(): Promise<bigint>;
     getUsersWithGoldAbove(threshold: bigint): Promise<Array<DealerInfo>>;
+    giftGoldToPost(postId: ChannelPostId, amount: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    giftGoldToStory(statusId: StatusId, amount: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     isBlockedBy(targetUserId: UserId): Promise<boolean>;
     isCallerAdmin(): Promise<boolean>;
     isHighlighted(statusId: StatusId): Promise<boolean>;
@@ -416,6 +431,7 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    recordChannelPostView(postId: ChannelPostId): Promise<void>;
     recordStoryView(statusId: StatusId): Promise<void>;
     removeFromHighlights(statusId: StatusId): Promise<{
         __kind__: "ok";
@@ -1481,6 +1497,46 @@ export class Backend implements backendInterface {
             return from_candid_vec_n79(this._uploadFile, this._downloadFile, result);
         }
     }
+    async giftGoldToPost(arg0: ChannelPostId, arg1: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.giftGoldToPost(arg0, arg1);
+                return from_candid_variant_n82(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.giftGoldToPost(arg0, arg1);
+            return from_candid_variant_n82(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async giftGoldToStory(arg0: StatusId, arg1: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.giftGoldToStory(arg0, arg1);
+                return from_candid_variant_n82(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.giftGoldToStory(arg0, arg1);
+            return from_candid_variant_n82(this._uploadFile, this._downloadFile, result);
+        }
+    }
     async isBlockedBy(arg0: UserId): Promise<boolean> {
         if (this.processError) {
             try {
@@ -1673,6 +1729,20 @@ export class Backend implements backendInterface {
         } else {
             const result = await this.actor.pinMessage(arg0, arg1);
             return from_candid_variant_n82(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async recordChannelPostView(arg0: ChannelPostId): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.recordChannelPostView(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.recordChannelPostView(arg0);
+            return result;
         }
     }
     async recordStoryView(arg0: StatusId): Promise<void> {
@@ -2285,15 +2355,18 @@ function from_candid_record_n31(_uploadFile: (file: ExternalBlob) => Promise<Uin
 }
 function from_candid_record_n40(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     likeCount: bigint;
+    viewCount: bigint;
     comments: Array<_ChannelCommentWithProfile>;
     likedByMe: boolean;
 }): {
     likeCount: bigint;
+    viewCount: bigint;
     comments: Array<ChannelCommentWithProfile>;
     likedByMe: boolean;
 } {
     return {
         likeCount: value.likeCount,
+        viewCount: value.viewCount,
         comments: from_candid_vec_n41(_uploadFile, _downloadFile, value.comments),
         likedByMe: value.likedByMe
     };

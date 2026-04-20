@@ -63,6 +63,7 @@ export interface ChannelPostInteractions {
   likeCount: bigint;
   likedByMe: boolean;
   comments: ChannelCommentWithProfile[];
+  viewCount: bigint;
 }
 
 // ─── Existing hooks ───────────────────────────────────────────────────────────
@@ -1316,6 +1317,74 @@ export function useUnpinChannelPost(channelId: ChannelId | null) {
       queryClient.invalidateQueries({
         queryKey: ["channel", channelId?.toString()],
       });
+    },
+  });
+}
+
+// ─── Gold Gift to Post / Story Hooks ─────────────────────────────────────────
+
+export function useRecordChannelPostView() {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (postId: ChannelPostId) => {
+      if (!actor) return;
+      await actor.recordChannelPostView(postId);
+    },
+    onSuccess: (_, postId) => {
+      queryClient.invalidateQueries({
+        queryKey: ["channelPostInteractions", postId.toString()],
+      });
+    },
+  });
+}
+
+export function useGiftGoldToPost() {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      postId,
+      amount,
+    }: { postId: ChannelPostId; amount: bigint }) => {
+      if (!actor) throw new Error("Actor not available");
+      await (
+        actor as ReturnType<typeof createActor> & {
+          giftGoldToPost: (
+            postId: ChannelPostId,
+            amount: bigint,
+          ) => Promise<void>;
+        }
+      ).giftGoldToPost(postId, amount);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["goldBalance"] });
+      queryClient.invalidateQueries({ queryKey: ["goldTransactions"] });
+    },
+  });
+}
+
+export function useGiftGoldToStory() {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      statusId,
+      amount,
+    }: { statusId: StatusId; amount: bigint }) => {
+      if (!actor) throw new Error("Actor not available");
+      await (
+        actor as ReturnType<typeof createActor> & {
+          giftGoldToStory: (
+            statusId: StatusId,
+            amount: bigint,
+          ) => Promise<void>;
+        }
+      ).giftGoldToStory(statusId, amount);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["goldBalance"] });
+      queryClient.invalidateQueries({ queryKey: ["goldTransactions"] });
     },
   });
 }

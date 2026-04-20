@@ -16,6 +16,7 @@ export interface ChannelWithMeta {
 export type Timestamp = bigint;
 export interface ChannelPostInteractions {
     likeCount: bigint;
+    viewCount: bigint;
     comments: Array<ChannelCommentWithProfile>;
     likedByMe: boolean;
 }
@@ -282,6 +283,20 @@ export interface backendInterface {
     getUserProfile(userId: UserId): Promise<UserProfile | null>;
     getUserStoriesPosted(): Promise<bigint>;
     getUsersWithGoldAbove(threshold: bigint): Promise<Array<DealerInfo>>;
+    giftGoldToPost(postId: ChannelPostId, amount: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    giftGoldToStory(statusId: StatusId, amount: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     isBlockedBy(targetUserId: UserId): Promise<boolean>;
     isCallerAdmin(): Promise<boolean>;
     isHighlighted(statusId: StatusId): Promise<boolean>;
@@ -316,6 +331,7 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    recordChannelPostView(postId: ChannelPostId): Promise<void>;
     recordStoryView(statusId: StatusId): Promise<void>;
     removeFromHighlights(statusId: StatusId): Promise<{
         __kind__: "ok";

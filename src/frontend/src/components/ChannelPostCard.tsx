@@ -25,7 +25,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Coins,
   Edit,
+  Eye,
   Heart,
   Loader2,
   MessageCircle,
@@ -43,7 +45,10 @@ import {
   useDeleteChannelPost,
   useEditChannelPost,
   useGetChannelPostInteractions,
+  useGetMyGoldBalance,
+  useGiftGoldToPost,
   useLikeChannelPost,
+  useRecordChannelPostView,
   useUnlikeChannelPost,
 } from "../hooks/useQueries";
 import type {
@@ -256,6 +261,9 @@ export default function ChannelPostCard({
   const [editText, setEditText] = useState(post.content.text);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [showFullText, setShowFullText] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [giftAmount, setGiftAmount] = useState("");
+  const [giftError, setGiftError] = useState("");
 
   const { data: interactions } = useGetChannelPostInteractions(post.id);
   const likePost = useLikeChannelPost();
@@ -263,10 +271,47 @@ export default function ChannelPostCard({
   const commentOnPost = useCommentOnChannelPost();
   const deletePost = useDeleteChannelPost(channelId);
   const editPost = useEditChannelPost(channelId);
+  const giftGold = useGiftGoldToPost();
+  const recordView = useRecordChannelPostView();
+  const { data: rawBalance } = useGetMyGoldBalance();
 
   const likeCount = Number(interactions?.likeCount ?? 0);
   const likedByMe = interactions?.likedByMe ?? false;
   const comments = interactions?.comments ?? [];
+  const viewCount = Number(interactions?.viewCount ?? 0);
+  const goldBalance =
+    rawBalance !== undefined ? Number(rawBalance) / 100 : null;
+
+  // Record a view when the post card is first rendered (best-effort, non-blocking)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs once per post
+  useEffect(() => {
+    recordView.mutate(post.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id]);
+
+  const handleGiftGold = async () => {
+    const amt = Number.parseFloat(giftAmount);
+    if (Number.isNaN(amt) || amt < 0.01) {
+      setGiftError("Minimum gift is 0.01 Gold");
+      return;
+    }
+    if (goldBalance !== null && goldBalance < amt) {
+      setGiftError("Insufficient Gold balance");
+      return;
+    }
+    setGiftError("");
+    try {
+      await giftGold.mutateAsync({
+        postId: post.id,
+        amount: BigInt(Math.round(amt * 100)),
+      });
+      toast.success(`Gifted ${amt.toFixed(2)} Gold successfully!`);
+      setGiftOpen(false);
+      setGiftAmount("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to gift Gold");
+    }
+  };
 
   const handleLike = () => {
     if (likedByMe) {
@@ -549,6 +594,39 @@ export default function ChannelPostCard({
         >
           <Share2 className="h-4 w-4 text-muted-foreground" />
         </button>
+
+        {/* View count — visible to all users */}
+        <div
+          className="flex items-center gap-1 px-2 py-1.5"
+          data-ocid={`channel.post.view_count.${ocid}`}
+        >
+          <Eye
+            className="h-3.5 w-3.5"
+            style={{ color: "oklch(0.55 0.02 55)" }}
+          />
+          <span className="text-xs" style={{ color: "oklch(0.55 0.02 55)" }}>
+            {viewCount}
+          </span>
+        </div>
+
+        {!isPostAuthor && (
+          <button
+            type="button"
+            data-ocid={`channel.post.gift_button.${ocid}`}
+            onClick={() => {
+              setGiftOpen(true);
+              setGiftAmount("");
+              setGiftError("");
+            }}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors ml-auto"
+            aria-label="Gift Gold"
+          >
+            <Coins
+              className="h-4 w-4"
+              style={{ color: "oklch(0.82 0.15 72)" }}
+            />
+          </button>
+        )}
       </div>
 
       {/* Comments section */}
@@ -667,6 +745,106 @@ export default function ChannelPostCard({
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 "Save"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Gift Gold Dialog */}
+      <Dialog
+        open={giftOpen}
+        onOpenChange={(open) => {
+          setGiftOpen(open);
+          if (!open) {
+            setGiftAmount("");
+            setGiftError("");
+          }
+        }}
+      >
+        <DialogContent
+          data-ocid={`channel.post.gift.dialog.${ocid}`}
+          className="bg-card border-border max-w-sm"
+        >
+          <DialogHeader>
+            <DialogTitle
+              className="font-display flex items-center gap-2"
+              style={{ color: "oklch(0.82 0.15 72)" }}
+            >
+              <Coins
+                className="h-5 w-5"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              />
+              Gift Gold
+            </DialogTitle>
+          </DialogHeader>
+          {goldBalance !== null && (
+            <p className="text-xs text-muted-foreground -mt-1">
+              Your balance:{" "}
+              <span
+                className="font-semibold"
+                style={{ color: "oklch(0.82 0.15 72)" }}
+              >
+                {goldBalance.toFixed(2)} Gold
+              </span>
+            </p>
+          )}
+          <div className="flex flex-col gap-2 mt-1">
+            <Input
+              data-ocid={`channel.post.gift.input.${ocid}`}
+              type="number"
+              min="0.01"
+              step="0.01"
+              placeholder="0.01"
+              value={giftAmount}
+              onChange={(e) => {
+                setGiftAmount(e.target.value);
+                setGiftError("");
+              }}
+              className="bg-input border-border"
+              style={{
+                borderColor: giftError ? "oklch(0.65 0.25 25)" : undefined,
+              }}
+            />
+            {giftError && (
+              <p
+                className="text-xs"
+                style={{ color: "oklch(0.65 0.25 25)" }}
+                data-ocid={`channel.post.gift.error_state.${ocid}`}
+              >
+                {giftError}
+              </p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 mt-1">
+            <Button
+              variant="ghost"
+              onClick={() => setGiftOpen(false)}
+              disabled={giftGold.isPending}
+              data-ocid={`channel.post.gift.cancel_button.${ocid}`}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleGiftGold}
+              disabled={
+                giftGold.isPending ||
+                !giftAmount ||
+                Number.parseFloat(giftAmount) < 0.01 ||
+                (goldBalance !== null &&
+                  goldBalance < Number.parseFloat(giftAmount))
+              }
+              data-ocid={`channel.post.gift.submit_button.${ocid}`}
+              style={{
+                background:
+                  "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                color: "oklch(0.08 0.004 55)",
+              }}
+            >
+              {giftGold.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Send Gold"
               )}
             </Button>
           </div>

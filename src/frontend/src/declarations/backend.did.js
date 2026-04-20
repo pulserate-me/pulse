@@ -87,6 +87,7 @@ export const ChannelCommentWithProfile = IDL.Record({
 });
 export const ChannelPostInteractions = IDL.Record({
   'likeCount' : IDL.Nat,
+  'viewCount' : IDL.Nat,
   'comments' : IDL.Vec(ChannelCommentWithProfile),
   'likedByMe' : IDL.Bool,
 });
@@ -374,6 +375,16 @@ export const idlService = IDL.Service({
       [IDL.Vec(DealerInfo)],
       ['query'],
     ),
+  'giftGoldToPost' : IDL.Func(
+      [ChannelPostId, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'giftGoldToStory' : IDL.Func(
+      [StatusId, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'isBlockedBy' : IDL.Func([UserId], [IDL.Bool], ['query']),
   'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
   'isHighlighted' : IDL.Func([StatusId], [IDL.Bool], ['query']),
@@ -395,6 +406,7 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
       [],
     ),
+  'recordChannelPostView' : IDL.Func([ChannelPostId], [], []),
   'recordStoryView' : IDL.Func([StatusId], [], []),
   'removeFromHighlights' : IDL.Func(
       [StatusId],
@@ -533,6 +545,7 @@ export const idlFactory = ({ IDL }) => {
   });
   const ChannelPostInteractions = IDL.Record({
     'likeCount' : IDL.Nat,
+    'viewCount' : IDL.Nat,
     'comments' : IDL.Vec(ChannelCommentWithProfile),
     'likedByMe' : IDL.Bool,
   });
@@ -849,6 +862,16 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(DealerInfo)],
         ['query'],
       ),
+    'giftGoldToPost' : IDL.Func(
+        [ChannelPostId, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'giftGoldToStory' : IDL.Func(
+        [StatusId, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'isBlockedBy' : IDL.Func([UserId], [IDL.Bool], ['query']),
     'isCallerAdmin' : IDL.Func([], [IDL.Bool], ['query']),
     'isHighlighted' : IDL.Func([StatusId], [IDL.Bool], ['query']),
@@ -870,6 +893,7 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
         [],
       ),
+    'recordChannelPostView' : IDL.Func([ChannelPostId], [], []),
     'recordStoryView' : IDL.Func([StatusId], [], []),
     'removeFromHighlights' : IDL.Func(
         [StatusId],

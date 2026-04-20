@@ -183,6 +183,13 @@ actor {
                         Set__532252804<UserId__313180070>>;
       var size : Nat__490723111
     };
+  stable channelPostViews :
+    {
+      var root :
+        Node__46230540<ChannelPostId__748044666,
+                        Set__532252804<UserId__313180070>>;
+      var size : Nat__490723111
+    };
   stable channelPosts :
     {
       var root :

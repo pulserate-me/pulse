@@ -178,6 +178,7 @@ type ChannelPostInteractions =
    comments: vec ChannelCommentWithProfile;
    likeCount: nat;
    likedByMe: bool;
+   viewCount: nat;
  };
 type ChannelPostId = nat;
 type ChannelPostContent = 
@@ -326,6 +327,16 @@ service : {
   getUserProfile: (userId: UserId) -> (opt UserProfile) query;
   getUserStoriesPosted: () -> (nat) query;
   getUsersWithGoldAbove: (threshold: nat) -> (vec DealerInfo) query;
+  giftGoldToPost: (postId: ChannelPostId, amount: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  giftGoldToStory: (statusId: StatusId, amount: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
   isBlockedBy: (targetUserId: UserId) -> (bool) query;
   isCallerAdmin: () -> (bool) query;
   isHighlighted: (statusId: StatusId) -> (bool) query;
@@ -352,6 +363,7 @@ service : {
       err: text;
       ok;
     });
+  recordChannelPostView: (postId: ChannelPostId) -> ();
   recordStoryView: (statusId: StatusId) -> ();
   removeFromHighlights: (statusId: StatusId) -> (variant {
                                                    err: text;

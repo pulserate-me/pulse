@@ -178,6 +178,7 @@ actor {
     likeCount : Nat;
     likedByMe : Bool;
     comments : [ChannelCommentWithProfile];
+    viewCount : Nat;
   };
 
   public type ChannelWithMeta = {
@@ -275,6 +276,9 @@ actor {
 
   // Story views: statusId -> set of principals who have viewed (unique per user)
   let storyViews = Map.empty<StatusId, Set.Set<UserId>>();
+
+  // Channel post views: postId -> set of principals who have viewed (unique per user)
+  let channelPostViews = Map.empty<ChannelPostId, Set.Set<UserId>>();
 
   // Block System State
   let blockedUsers = Map.empty<UserId, Set.Set<UserId>>();
@@ -1618,7 +1622,35 @@ actor {
         };
         { id = c.id; author = authorProfile; text = c.text; timestamp = c.timestamp };
       });
-    { likeCount; likedByMe; comments };
+    let viewCount = switch (channelPostViews.get(postId)) {
+      case (null) { 0 };
+      case (?s) { s.size() };
+    };
+    { likeCount; likedByMe; comments; viewCount };
+  };
+
+  // Record that the caller has viewed a channel post (deduplicated per user, author view not counted)
+  public shared ({ caller }) func recordChannelPostView(postId : ChannelPostId) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can record post views");
+    };
+    switch (channelPosts.get(postId)) {
+      case (null) { Runtime.trap("Post not found") };
+      case (?post) {
+        // Skip counting the author's own views
+        if (post.author == caller) { return };
+        let viewers = switch (channelPostViews.get(postId)) {
+          case (null) {
+            let s = Set.empty<UserId>();
+            channelPostViews.add(postId, s);
+            s;
+          };
+          case (?s) { s };
+        };
+        viewers.add(caller);
+        channelPostViews.add(postId, viewers);
+      };
+    };
   };
 
   public shared ({ caller }) func forwardChannelPost(postId : ChannelPostId, conversationId : ConversationId) : async MessageId {
@@ -1855,6 +1887,103 @@ actor {
         };
       };
     };
+  };
+
+  // Internal helper: transfer Gold between two principals with 5% fee distribution.
+  // `amount` is in the same unit as goldBalances (1 unit = 0.01 Gold).
+  // Returns #err text on failure, #ok on success.
+  func doGoldTransfer(fromId : UserId, toId : UserId, amount : Nat) : { #ok; #err : Text } {
+    if (amount == 0) { return #err("Amount must be greater than 0") };
+    let senderBalance = switch (goldBalances.get(fromId)) {
+      case (null) { 0 };
+      case (?b) { b };
+    };
+    if (senderBalance < amount) { return #err("Insufficient Gold balance") };
+    let feeAmount : Nat = amount * 5 / 100;
+    let recipientReceives : Nat = if (amount >= feeAmount) { amount - feeAmount } else { 0 };
+    let newSenderBalance : Nat = if (senderBalance >= amount) { senderBalance - amount } else { 0 };
+    goldBalances.add(fromId, newSenderBalance);
+    let recipientBalance = switch (goldBalances.get(toId)) {
+      case (null) { 0 };
+      case (?b) { b };
+    };
+    goldBalances.add(toId, recipientBalance + recipientReceives);
+    let now = Time.now();
+    let fromProfile = switch (users.get(fromId)) {
+      case (null) { { username = "unknown"; displayName = "Unknown"; lastSeen = 0; bio = null; avatarUrl = null } };
+      case (?p) { p };
+    };
+    let toProfile = switch (users.get(toId)) {
+      case (null) { { username = "unknown"; displayName = "Unknown"; lastSeen = 0; bio = null; avatarUrl = null } };
+      case (?p) { p };
+    };
+    let sentTxId = nextGoldTxId;
+    nextGoldTxId += 1;
+    recordGoldTx(fromId, { id = sentTxId; txType = #sent; amount; counterpartyUsername = ?toProfile.username; timestamp = now });
+    let recvTxId = nextGoldTxId;
+    nextGoldTxId += 1;
+    recordGoldTx(toId, { id = recvTxId; txType = #received; amount = recipientReceives; counterpartyUsername = ?fromProfile.username; timestamp = now });
+    addNotification(toId, #goldGifted { fromUsername = fromProfile.username; amount = recipientReceives });
+    if (feeAmount > 0) {
+      let allHolders = goldBalances.toArray();
+      let totalSupply = allHolders.foldLeft(0 : Nat, func(acc, (_, bal)) { acc + bal });
+      if (totalSupply > 0) {
+        for ((holderId, holderBal) in allHolders.vals()) {
+          if (holderBal > 0) {
+            let share = feeAmount * holderBal / totalSupply;
+            if (share > 0) {
+              let currentBal = switch (goldBalances.get(holderId)) {
+                case (null) { 0 };
+                case (?b) { b };
+              };
+              goldBalances.add(holderId, currentBal + share);
+              let feeTxId = nextGoldTxId;
+              nextGoldTxId += 1;
+              recordGoldTx(holderId, { id = feeTxId; txType = #received; amount = share; counterpartyUsername = ?"platform fee"; timestamp = now });
+            };
+          };
+        };
+      };
+    };
+    #ok;
+  };
+
+  // Gift Gold to a channel post author (minimum 0.01 Gold = 1 unit)
+  public shared ({ caller }) func giftGoldToPost(postId : ChannelPostId, amount : Nat) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+    if (amount < 1) { return #err("Minimum gift is 0.01 Gold") };
+    let post = switch (channelPosts.get(postId)) {
+      case (null) { return #err("Post not found") };
+      case (?p) { p };
+    };
+    if (post.author == caller) { return #err("Cannot gift Gold to yourself") };
+    let senderBalance = switch (goldBalances.get(caller)) {
+      case (null) { 0 };
+      case (?b) { b };
+    };
+    if (senderBalance < amount) { return #err("Insufficient Gold balance") };
+    doGoldTransfer(caller, post.author, amount);
+  };
+
+  // Gift Gold to a story author (minimum 0.01 Gold = 1 unit)
+  public shared ({ caller }) func giftGoldToStory(statusId : StatusId, amount : Nat) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+    if (amount < 1) { return #err("Minimum gift is 0.01 Gold") };
+    let story = switch (statuses.get(statusId)) {
+      case (null) { return #err("Story not found") };
+      case (?s) { s };
+    };
+    if (story.author == caller) { return #err("Cannot gift Gold to yourself") };
+    let senderBalance = switch (goldBalances.get(caller)) {
+      case (null) { 0 };
+      case (?b) { b };
+    };
+    if (senderBalance < amount) { return #err("Insufficient Gold balance") };
+    doGoldTransfer(caller, story.author, amount);
   };
 
   // Send a buy request message to admin (no balance change)
