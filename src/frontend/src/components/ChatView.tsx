@@ -57,6 +57,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type {
@@ -67,6 +68,7 @@ import type {
   MessageId,
 } from "../backend";
 import { createActor } from "../backend";
+import { useIcpPrice } from "../hooks/useIcpPrice";
 import { useMediaUpload } from "../hooks/useMediaUpload";
 import {
   useAddGroupMember,
@@ -181,7 +183,6 @@ function MediaMessage({ url, mediaType, onImageClick }: MediaMessageProps) {
   }
   if (mediaType.__kind__ === "video") {
     return (
-      // biome-ignore lint/a11y/useMediaCaption: user-uploaded video, captions unavailable
       <video
         controls
         muted
@@ -557,8 +558,132 @@ function MessageBubble({
   const deleteMessage = useDeleteMessage(conversationId);
 
   // Highlight matching text for search
-  const renderText = (raw: string) => {
-    if (!searchHighlight || !raw) return raw;
+  // Detect payment links and QR images, highlight search terms
+  const renderText = (raw: string): React.ReactNode => {
+    if (!raw) return raw;
+
+    // Payment URL patterns: /pay/ path on same origin, or QR server image pointing to payment URL
+    const appOrigin = window.location.origin;
+    const paymentUrlPattern = new RegExp(
+      `(${appOrigin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/pay/[^\\s]+|https?://[^\\s]*precious-lime-mko-draft\.caffeine\.xyz/pay/[^\\s]+)`,
+      "gi",
+    );
+    const _qrPattern =
+      /https?:\/\/api\.qrserver\.com\/[^\s]+data=([^\s&]+)[^\s]*/gi;
+
+    // First check if the whole text is a QR image URL
+    const qrMatch = raw.match(
+      /^(https?:\/\/api\.qrserver\.com\/[^\s]+data=([^\s&]+)[^\s]*)$/,
+    );
+    if (qrMatch) {
+      let payLink: string | null = null;
+      try {
+        payLink = decodeURIComponent(qrMatch[2]);
+      } catch {
+        payLink = qrMatch[2];
+      }
+      const isPaymentQr =
+        payLink &&
+        (payLink.includes("/pay/") || payLink.includes("caffeine.xyz/pay/"));
+      if (isPaymentQr && payLink) {
+        const finalPayLink = payLink;
+        return (
+          <a
+            href={finalPayLink}
+            className="block"
+            data-ocid="chat.payment_qr_link"
+          >
+            <img
+              src={qrMatch[1]}
+              alt="Payment QR code — tap to pay"
+              className="max-w-[180px] max-h-[180px] rounded-xl mt-1 border-2"
+              style={{
+                borderColor: "oklch(0.82 0.15 72 / 0.5)",
+                display: "block",
+              }}
+              loading="lazy"
+            />
+            <span
+              className="text-xs block mt-1"
+              style={{ color: "oklch(0.82 0.15 72)" }}
+            >
+              Tap to view payment page
+            </span>
+          </a>
+        );
+      }
+    }
+
+    // Split by payment URL pattern and render links inline
+    const paymentSegments = raw.split(paymentUrlPattern);
+    if (paymentSegments.length > 1) {
+      return (
+        <>
+          {paymentSegments.map((seg, segIdx) => {
+            if (paymentUrlPattern.test(seg)) {
+              paymentUrlPattern.lastIndex = 0;
+              return (
+                <a
+                  // biome-ignore lint/suspicious/noArrayIndexKey: segment index is positional, no stable key available
+                  key={`pay-${segIdx}`}
+                  href={seg}
+                  data-ocid="chat.payment_link"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg font-medium text-xs"
+                  style={{
+                    color: "oklch(0.08 0.004 55)",
+                    background:
+                      "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                  }}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 6v6l4 2" />
+                  </svg>
+                  Pay
+                </a>
+              );
+            }
+            paymentUrlPattern.lastIndex = 0;
+            if (!seg) return null;
+            // Apply search highlight to non-link segment
+            if (!searchHighlight) return seg;
+            const idx = seg.toLowerCase().indexOf(searchHighlight);
+            if (idx === -1) return seg;
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: segment index is positional, no stable key available
+              <React.Fragment key={`seg-${segIdx}`}>
+                {seg.slice(0, idx)}
+                <mark
+                  style={{
+                    background: "oklch(0.82 0.15 72 / 0.35)",
+                    color: "inherit",
+                    borderRadius: "2px",
+                    padding: "0 1px",
+                  }}
+                >
+                  {seg.slice(idx, idx + searchHighlight.length)}
+                </mark>
+                {seg.slice(idx + searchHighlight.length)}
+              </React.Fragment>
+            );
+          })}
+        </>
+      );
+    }
+
+    // Fallback: search highlight only
+    if (!searchHighlight) return raw;
     const idx = raw.toLowerCase().indexOf(searchHighlight);
     if (idx === -1) return raw;
     return (
@@ -1057,6 +1182,7 @@ export default function ChatView({
   const [giftGoldOpen, setGiftGoldOpen] = useState(false);
   const [giftAmount, setGiftAmount] = useState("");
   const [giftError, setGiftError] = useState("");
+  const [giftCurrency, setGiftCurrency] = useState<"gold" | "usd">("gold");
   const [forwardMsgOpen, setForwardMsgOpen] = useState(false);
   const [forwardMsgContent, setForwardMsgContent] = useState<{
     text: string;
@@ -1096,6 +1222,11 @@ export default function ChatView({
   const { mutateAsync: updateGroupAvatar } = useUpdateGroupAvatar();
   const transferGold = useTransferGold();
   const { data: myGoldBalance } = useGetMyGoldBalance();
+  const {
+    price: icpPrice,
+    loading: icpPriceLoading,
+    retry: retryIcpPrice,
+  } = useIcpPrice();
   const { data: blockedUsers = [] } = useGetMyBlockedUsers();
   const { mutate: blockUser, isPending: blocking } = useBlockUser();
   const { mutate: unblockUser, isPending: unblocking } = useUnblockUser();
@@ -1295,22 +1426,57 @@ export default function ChatView({
   }, [pendingFilePreview]);
 
   const handleGiftGold = async () => {
-    const amt = Number.parseFloat(giftAmount);
-    if (!amt || amt < 0.01) {
-      setGiftError("Minimum gift amount is 0.01 Gold");
+    const rawAmt = Number.parseFloat(giftAmount);
+    if (!rawAmt || Number.isNaN(rawAmt)) {
+      setGiftError("Please enter a valid amount");
       return;
     }
+
+    // Convert to Gold amount regardless of input mode
+    const goldAmt =
+      giftCurrency === "usd"
+        ? icpPrice != null
+          ? rawAmt / icpPrice
+          : null
+        : rawAmt;
+
+    if (goldAmt === null) {
+      setGiftError("Price unavailable, please try again");
+      return;
+    }
+
+    if (goldAmt < 0.01) {
+      if (giftCurrency === "usd" && icpPrice != null) {
+        setGiftError(
+          `Minimum gift is 0.01 Pulse (≈ $${(0.01 * icpPrice).toFixed(4)})`,
+        );
+      } else {
+        setGiftError("Minimum gift amount is 0.01 Pulse");
+      }
+      return;
+    }
+
+    const myBalance =
+      myGoldBalance !== undefined ? Number(myGoldBalance) / 10000 : null;
+    if (myBalance !== null && myBalance < goldAmt) {
+      setGiftError("Insufficient Pulse balance");
+      return;
+    }
+
     const recipientUsername = otherProfile?.username;
     if (!recipientUsername) return;
     try {
       await transferGold.mutateAsync({
         toUsername: recipientUsername,
-        amount: BigInt(Math.round(amt * 100)),
+        amount: BigInt(Math.round(goldAmt * 10000)),
       });
-      toast.success(`Sent ✦ ${amt.toFixed(2)} Gold to ${recipientUsername}`);
+      toast.success(
+        `Sent ✦ ${goldAmt.toFixed(4)} Pulse to ${recipientUsername}`,
+      );
       setGiftGoldOpen(false);
       setGiftAmount("");
       setGiftError("");
+      setGiftCurrency("gold");
     } catch (e: unknown) {
       const err = e as { message?: string };
       toast.error(err?.message ?? "Transfer failed");
@@ -2342,7 +2508,7 @@ export default function ChatView({
                   onClick={() => setGiftGoldOpen(true)}
                   disabled={isUploading || sending}
                   className="h-10 w-10 rounded-xl hover:bg-muted shrink-0"
-                  title="Gift Gold"
+                  title="Gift Pulse"
                 >
                   <Coins
                     className="h-5 w-5"
@@ -2492,7 +2658,20 @@ export default function ChatView({
       )}
 
       {/* Gift Gold Dialog */}
-      <Dialog open={giftGoldOpen} onOpenChange={setGiftGoldOpen}>
+      <Dialog
+        open={giftGoldOpen}
+        onOpenChange={(open) => {
+          setGiftGoldOpen(open);
+          if (!open) {
+            setGiftAmount("");
+            setGiftError("");
+            setGiftCurrency("gold");
+          } else if (icpPrice === null && !icpPriceLoading) {
+            // Retry price fetch whenever dialog opens and price is unavailable
+            retryIcpPrice();
+          }
+        }}
+      >
         <DialogContent
           className="sm:max-w-sm"
           style={{
@@ -2503,25 +2682,129 @@ export default function ChatView({
         >
           <DialogHeader>
             <DialogTitle style={{ color: "oklch(0.82 0.15 72)" }}>
-              Gift Gold to {otherProfile?.username}
+              Gift Pulse to {otherProfile?.username}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label className="text-muted-foreground text-xs">Amount</Label>
-              <Input
-                data-ocid="chat.gift_gold.input"
-                type="number"
-                min="0.01"
-                step="0.01"
-                placeholder="Enter amount..."
-                value={giftAmount}
-                onChange={(e) => {
-                  setGiftAmount(e.target.value);
+            {/* Currency toggle */}
+            <div
+              className="flex rounded-lg overflow-hidden border"
+              style={{ borderColor: "oklch(0.82 0.15 72 / 0.25)" }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setGiftCurrency("gold");
+                  setGiftAmount("");
                   setGiftError("");
                 }}
-                className={`bg-input border-border${giftError ? " border-destructive" : ""}`}
-              />
+                className="flex-1 py-1.5 text-xs font-semibold transition-colors"
+                style={
+                  giftCurrency === "gold"
+                    ? {
+                        background:
+                          "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                        color: "oklch(0.08 0.004 55)",
+                      }
+                    : {
+                        background: "oklch(0.10 0.01 55)",
+                        color: "oklch(0.55 0.04 55)",
+                      }
+                }
+                data-ocid="chat.gift_gold.tab_gold"
+              >
+                ✦ Pulse
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setGiftCurrency("usd");
+                  setGiftAmount("");
+                  setGiftError("");
+                }}
+                className="flex-1 py-1.5 text-xs font-semibold transition-colors"
+                style={
+                  giftCurrency === "usd"
+                    ? {
+                        background:
+                          "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                        color: "oklch(0.08 0.004 55)",
+                      }
+                    : {
+                        background: "oklch(0.10 0.01 55)",
+                        color: "oklch(0.55 0.04 55)",
+                      }
+                }
+                data-ocid="chat.gift_gold.tab_usd"
+              >
+                $ USD
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-muted-foreground text-xs">
+                {giftCurrency === "usd" ? "Amount (USD)" : "Amount"}
+              </Label>
+              <div className="relative">
+                {giftCurrency === "usd" && (
+                  <span
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none"
+                    style={{ color: "oklch(0.82 0.15 72)" }}
+                  >
+                    $
+                  </span>
+                )}
+                <Input
+                  data-ocid="chat.gift_gold.input"
+                  type="number"
+                  min="0.01"
+                  step="0.0001"
+                  placeholder="0.0000"
+                  value={giftAmount}
+                  onChange={(e) => {
+                    setGiftAmount(e.target.value);
+                    setGiftError("");
+                  }}
+                  className={`bg-input border-border${giftCurrency === "usd" ? " pl-7" : ""}${giftError ? " border-destructive" : ""}`}
+                />
+              </div>
+              {/* Live equivalent */}
+              {giftAmount && !Number.isNaN(Number.parseFloat(giftAmount)) && (
+                <p className="text-xs" style={{ color: "oklch(0.65 0.05 72)" }}>
+                  {icpPriceLoading ? (
+                    <span className="flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Loading
+                      price…
+                    </span>
+                  ) : icpPrice != null ? (
+                    giftCurrency === "gold" ? (
+                      <>
+                        ≈ $
+                        {(Number.parseFloat(giftAmount) * icpPrice).toFixed(2)}{" "}
+                        USD
+                      </>
+                    ) : (
+                      <>
+                        ≈{" "}
+                        {(Number.parseFloat(giftAmount) / icpPrice).toFixed(4)}{" "}
+                        Pulse
+                      </>
+                    )
+                  ) : (
+                    <span className="flex items-center gap-1.5">
+                      Price unavailable
+                      <button
+                        type="button"
+                        onClick={retryIcpPrice}
+                        className="underline hover:no-underline"
+                        style={{ color: "oklch(0.82 0.15 72)" }}
+                      >
+                        Retry
+                      </button>
+                    </span>
+                  )}
+                </p>
+              )}
             </div>
             {giftError && (
               <p
@@ -2532,8 +2815,8 @@ export default function ChatView({
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              Your balance: ✦ {(Number(myGoldBalance ?? 0) / 100).toFixed(2)}{" "}
-              Gold
+              Your balance: ✦ {(Number(myGoldBalance ?? 0) / 10000).toFixed(4)}{" "}
+              Pulse
             </p>
           </div>
           <DialogFooter className="gap-2">
@@ -2551,7 +2834,18 @@ export default function ChatView({
               disabled={
                 transferGold.isPending ||
                 !giftAmount ||
-                Number.parseFloat(giftAmount) < 0.01
+                (icpPriceLoading && giftCurrency === "usd") ||
+                (() => {
+                  const raw = Number.parseFloat(giftAmount);
+                  if (!raw || Number.isNaN(raw)) return true;
+                  const gold =
+                    giftCurrency === "usd"
+                      ? icpPrice != null
+                        ? raw / icpPrice
+                        : null
+                      : raw;
+                  return gold === null || gold < 0.01;
+                })()
               }
               style={{
                 background:
@@ -2562,7 +2856,7 @@ export default function ChatView({
               {transferGold.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-1" />
               ) : null}
-              Send Gold
+              Send Pulse
             </Button>
           </DialogFooter>
         </DialogContent>

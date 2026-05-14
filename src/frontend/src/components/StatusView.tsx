@@ -14,10 +14,12 @@ import {
   Eye,
   Heart,
   Loader2,
+  MessageCircle,
   Plus,
   Send,
   Sparkles,
   Users,
+  Wifi,
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -26,15 +28,18 @@ import { toast } from "sonner";
 import type { Status, UserProfile } from "../backend";
 import { createActor } from "../backend";
 import type { StatusId } from "../backend";
+import { useIcpPrice } from "../hooks/useIcpPrice";
 import {
   useCommentOnStatus,
   useGetAllStories,
   useGetMyGoldBalance,
   useGetMyStatuses,
+  useGetOnlineUsersWithProfiles,
   useGetStatusInteractions,
   useGetStoryViewersWithAvatars,
   useGiftGoldToStory,
   useLikeStatus,
+  useListUserConversations,
   useUnlikeStatus,
 } from "../hooks/useQueries";
 import AddStatusModal from "./AddStatusModal";
@@ -314,6 +319,7 @@ function StatusViewer({
   const [giftOpen, setGiftOpen] = useState(false);
   const [giftAmount, setGiftAmount] = useState("");
   const [giftError, setGiftError] = useState("");
+  const [giftCurrency, setGiftCurrency] = useState<"gold" | "usd">("gold");
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const status = statuses[index];
@@ -326,8 +332,9 @@ function StatusViewer({
   const giftGold = useGiftGoldToStory();
   const { data: rawBalance } = useGetMyGoldBalance();
   const { actor } = useActor(createActor);
+  const { price: icpPrice, loading: icpPriceLoading } = useIcpPrice();
   const goldBalance =
-    rawBalance !== undefined ? Number(rawBalance) / 100 : null;
+    rawBalance !== undefined ? Number(rawBalance) / 10000 : null;
 
   // Record a view whenever a new story slide is shown — skip the story owner's own views
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally re-run when index/status changes
@@ -372,30 +379,54 @@ function StatusViewer({
   };
 
   const handleGiftGold = async () => {
-    const amt = Number.parseFloat(giftAmount);
-    if (Number.isNaN(amt) || amt < 0.01) {
-      setGiftError("Minimum gift is 0.01 Gold");
+    const rawAmt = Number.parseFloat(giftAmount);
+    if (Number.isNaN(rawAmt) || !rawAmt) {
+      setGiftError("Please enter a valid amount");
       return;
     }
-    if (goldBalance !== null && goldBalance < amt) {
-      setGiftError("Insufficient Gold balance");
+
+    const goldAmt =
+      giftCurrency === "usd"
+        ? icpPrice != null
+          ? rawAmt / icpPrice
+          : null
+        : rawAmt;
+
+    if (goldAmt === null) {
+      setGiftError("Price unavailable, please try again");
+      return;
+    }
+
+    if (goldAmt < 0.01) {
+      if (giftCurrency === "usd" && icpPrice != null) {
+        setGiftError(
+          `Minimum gift is 0.01 Pulse (≈ $${(0.01 * icpPrice).toFixed(4)})`,
+        );
+      } else {
+        setGiftError("Minimum gift is 0.01 Pulse");
+      }
+      return;
+    }
+
+    if (goldBalance !== null && goldBalance < goldAmt) {
+      setGiftError("Insufficient Pulse balance");
       return;
     }
     setGiftError("");
     try {
       await giftGold.mutateAsync({
         statusId: status.id,
-        amount: BigInt(Math.round(amt * 100)),
+        amount: BigInt(Math.round(goldAmt * 10000)),
       });
-      toast.success(`Gifted ${amt.toFixed(2)} Gold successfully!`);
+      toast.success(`Gifted ${goldAmt.toFixed(4)} Pulse successfully!`);
       setGiftOpen(false);
       setGiftAmount("");
+      setGiftCurrency("gold");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to gift Gold");
+      toast.error(err instanceof Error ? err.message : "Failed to gift Pulse");
     }
   };
 
-  const recentComments = interactions?.comments?.slice(-3) ?? [];
   const likeCount = Number(interactions?.likeCount ?? 0);
   // viewCount: use live value from interactions (backend stores view count in storyViews stable map)
   const viewCount = Number(interactions?.viewCount ?? 0);
@@ -468,8 +499,10 @@ function StatusViewer({
         </div>
       )}
 
-      {/* Content area */}
-      <div className="flex-1 relative flex flex-col items-center justify-center overflow-hidden">
+      {/* Content area — flex-1 so it fills available space between header and action bar;
+           items-start + pt-2 ensures the very top of media is never clipped.
+           overflow-y-auto allows scrolling if content is tall. */}
+      <div className="flex-1 relative flex flex-col items-center justify-start overflow-y-auto min-h-0 pt-2 pb-2">
         {/* Tap zones for prev/next — behind media (z-10) */}
         {index > 0 && (
           <button
@@ -491,7 +524,8 @@ function StatusViewer({
           <img
             src={status.content.mediaUrl}
             alt="Story"
-            className="max-w-full max-h-[70vh] object-contain rounded-xl relative z-20"
+            className="max-w-full object-contain rounded-xl relative z-20"
+            style={{ maxHeight: "55vh" }}
           />
         )}
 
@@ -510,17 +544,18 @@ function StatusViewer({
             onCanPlay={() => {
               videoRef.current?.play().catch(() => {});
             }}
-            className="max-w-full max-h-[70vh] object-contain rounded-xl relative z-20"
-            style={{ WebkitTransform: "translateZ(0)" }}
+            className="max-w-full object-contain rounded-xl relative z-20"
+            style={{ maxHeight: "55vh", WebkitTransform: "translateZ(0)" }}
           />
         )}
 
+        {/* Caption — shown below media, always fully visible */}
         {status.content.text && (
           <div
-            className="px-8 py-6 rounded-2xl text-center text-white text-xl font-semibold max-w-sm relative z-20"
+            className="mt-3 mx-4 px-5 py-3 rounded-2xl text-center text-white text-base font-semibold max-w-sm relative z-20 shrink-0"
             style={{
               background: status.content.mediaUrl
-                ? "oklch(0.0 0 0 / 0.5)"
+                ? "oklch(0.0 0 0 / 0.6)"
                 : "linear-gradient(135deg, oklch(0.25 0.04 72), oklch(0.18 0.03 65))",
             }}
           >
@@ -565,10 +600,10 @@ function StatusViewer({
           )}
         </AnimatePresence>
 
-        {/* Recent comments */}
-        {recentComments.length > 0 && (
-          <div className="flex flex-col gap-1 max-h-24 overflow-y-auto">
-            {recentComments.map((c) => (
+        {/* Comments — newest shown first; scroll down to see earlier ones */}
+        {interactions?.comments && interactions.comments.length > 0 && (
+          <div className="flex flex-col-reverse gap-1 max-h-20 overflow-y-auto shrink-0">
+            {[...interactions.comments].reverse().map((c) => (
               <div key={String(c.id)} className="flex items-start gap-2">
                 <span
                   className="text-xs font-semibold shrink-0"
@@ -663,7 +698,7 @@ function StatusViewer({
                 border: "1px solid oklch(0.82 0.15 72 / 0.35)",
               }}
               data-ocid="status.gift_button"
-              aria-label="Gift Gold"
+              aria-label="Gift Pulse"
             >
               <Coins
                 className="h-4 w-4"
@@ -724,6 +759,7 @@ function StatusViewer({
           if (!open) {
             setGiftAmount("");
             setGiftError("");
+            setGiftCurrency("gold");
           }
         }}
       >
@@ -741,7 +777,7 @@ function StatusViewer({
                 className="h-5 w-5"
                 style={{ color: "oklch(0.82 0.15 72)" }}
               />
-              Gift Gold
+              Gift Pulse
             </DialogTitle>
           </DialogHeader>
           {goldBalance !== null && (
@@ -751,27 +787,115 @@ function StatusViewer({
                 className="font-semibold"
                 style={{ color: "oklch(0.82 0.15 72)" }}
               >
-                {goldBalance.toFixed(2)} Gold
+                {goldBalance.toFixed(4)} Pulse
               </span>
             </p>
           )}
-          <div className="flex flex-col gap-2 mt-1">
-            <Input
-              data-ocid="status.gift.input"
-              type="number"
-              min="0.01"
-              step="0.01"
-              placeholder="0.01"
-              value={giftAmount}
-              onChange={(e) => {
-                setGiftAmount(e.target.value);
+          {/* Currency toggle */}
+          <div
+            className="flex rounded-lg overflow-hidden border"
+            style={{ borderColor: "oklch(0.82 0.15 72 / 0.25)" }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setGiftCurrency("gold");
+                setGiftAmount("");
                 setGiftError("");
               }}
-              className="bg-input border-border"
-              style={{
-                borderColor: giftError ? "oklch(0.65 0.25 25)" : undefined,
+              className="flex-1 py-1.5 text-xs font-semibold transition-colors"
+              style={
+                giftCurrency === "gold"
+                  ? {
+                      background:
+                        "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                      color: "oklch(0.08 0.004 55)",
+                    }
+                  : {
+                      background: "oklch(0.10 0.01 55)",
+                      color: "oklch(0.55 0.04 55)",
+                    }
+              }
+              data-ocid="status.gift.tab_gold"
+            >
+              ✦ Pulse
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setGiftCurrency("usd");
+                setGiftAmount("");
+                setGiftError("");
               }}
-            />
+              className="flex-1 py-1.5 text-xs font-semibold transition-colors"
+              style={
+                giftCurrency === "usd"
+                  ? {
+                      background:
+                        "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                      color: "oklch(0.08 0.004 55)",
+                    }
+                  : {
+                      background: "oklch(0.10 0.01 55)",
+                      color: "oklch(0.55 0.04 55)",
+                    }
+              }
+              data-ocid="status.gift.tab_usd"
+            >
+              $ USD
+            </button>
+          </div>
+          <div className="flex flex-col gap-2 mt-1">
+            <div className="relative">
+              {giftCurrency === "usd" && (
+                <span
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                >
+                  $
+                </span>
+              )}
+              <Input
+                data-ocid="status.gift.input"
+                type="number"
+                min="0.01"
+                step="0.0001"
+                placeholder="0.0100"
+                value={giftAmount}
+                onChange={(e) => {
+                  setGiftAmount(e.target.value);
+                  setGiftError("");
+                }}
+                className={`bg-input border-border${giftCurrency === "usd" ? " pl-7" : ""}`}
+                style={{
+                  borderColor: giftError ? "oklch(0.65 0.25 25)" : undefined,
+                }}
+              />
+            </div>
+            {/* Live equivalent */}
+            {giftAmount && !Number.isNaN(Number.parseFloat(giftAmount)) && (
+              <p className="text-xs" style={{ color: "oklch(0.65 0.05 72)" }}>
+                {icpPriceLoading ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Loading price…
+                  </span>
+                ) : icpPrice != null ? (
+                  giftCurrency === "gold" ? (
+                    <>
+                      ≈ ${(Number.parseFloat(giftAmount) * icpPrice).toFixed(2)}{" "}
+                      USD
+                    </>
+                  ) : (
+                    <>
+                      ≈ {(Number.parseFloat(giftAmount) / icpPrice).toFixed(4)}{" "}
+                      Pulse
+                    </>
+                  )
+                ) : (
+                  "Price unavailable"
+                )}
+              </p>
+            )}
             {giftError && (
               <p
                 className="text-xs"
@@ -796,9 +920,18 @@ function StatusViewer({
               disabled={
                 giftGold.isPending ||
                 !giftAmount ||
-                Number.parseFloat(giftAmount) < 0.01 ||
-                (goldBalance !== null &&
-                  goldBalance < Number.parseFloat(giftAmount))
+                (icpPriceLoading && giftCurrency === "usd") ||
+                (() => {
+                  const raw = Number.parseFloat(giftAmount);
+                  if (!raw || Number.isNaN(raw)) return true;
+                  const gold =
+                    giftCurrency === "usd"
+                      ? icpPrice != null
+                        ? raw / icpPrice
+                        : null
+                      : raw;
+                  return gold === null || gold < 0.01;
+                })()
               }
               data-ocid="status.gift.submit_button"
               style={{
@@ -810,7 +943,7 @@ function StatusViewer({
               {giftGold.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                "Send Gold"
+                "Send Pulse"
               )}
             </Button>
           </div>
@@ -820,11 +953,260 @@ function StatusViewer({
   );
 }
 
+// ─── Online Users Section ──────────────────────────────────────────────────
+
+const ONLINE_PAGE_SIZE = 9;
+
+function OnlineUsersSection({
+  enabled,
+  currentUserId,
+  onStartChat,
+}: {
+  enabled: boolean;
+  currentUserId: string;
+  onStartChat?: (userId: string) => void;
+}) {
+  const [onlinePage, setOnlinePage] = useState(1);
+  const [filter, setFilter] = useState<"all" | "myConversations">("all");
+  const { data: onlineUsers = [], isLoading: onlineLoading } =
+    useGetOnlineUsersWithProfiles(enabled);
+  const { data: conversations = [] } = useListUserConversations();
+
+  // Build a set of DM partner userIds for fast lookup
+  const dmPartnerIds = new Set<string>(
+    conversations
+      .filter((c) => c.type.__kind__ === "direct")
+      .flatMap((c) =>
+        c.members
+          .map((m) =>
+            typeof m === "string" ? m : (m as { toText(): string }).toText(),
+          )
+          .filter((id) => id !== currentUserId),
+      ),
+  );
+
+  // Filter out self first, then apply the tab filter
+  const withoutSelf = onlineUsers.filter((u) => u.userId !== currentUserId);
+  const filteredOnline =
+    filter === "myConversations"
+      ? withoutSelf.filter((u) => dmPartnerIds.has(u.userId))
+      : withoutSelf;
+
+  const visibleOnline = filteredOnline.slice(0, onlinePage * ONLINE_PAGE_SIZE);
+  const hasMoreOnline = filteredOnline.length > onlinePage * ONLINE_PAGE_SIZE;
+
+  // Reset page when filter changes
+  const handleFilterChange = (next: "all" | "myConversations") => {
+    setFilter(next);
+    setOnlinePage(1);
+  };
+
+  return (
+    <div
+      className="mt-auto px-4 pt-4 pb-5 border-t border-border"
+      data-ocid="online_users.section"
+    >
+      {/* Section heading + filter pill */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span
+          className="w-2 h-2 rounded-full shrink-0 animate-pulse"
+          style={{ background: "oklch(0.72 0.19 145)" }}
+          aria-hidden="true"
+        />
+        <p
+          className="text-xs font-semibold uppercase tracking-wider"
+          style={{ letterSpacing: "0.1em", color: "oklch(0.72 0.19 145)" }}
+        >
+          Online Now
+        </p>
+        {!onlineLoading && withoutSelf.length > 0 && (
+          <span
+            className="text-xs font-medium px-1.5 py-0.5 rounded-full"
+            style={{
+              background: "oklch(0.72 0.19 145 / 0.15)",
+              color: "oklch(0.72 0.19 145)",
+            }}
+          >
+            {withoutSelf.length}
+          </span>
+        )}
+        {/* Compact pill filter — only shown when there are users online */}
+        {!onlineLoading && withoutSelf.length > 0 && (
+          <div
+            className="ml-auto flex rounded-full overflow-hidden"
+            style={{
+              border: "1px solid oklch(0.82 0.15 72 / 0.25)",
+              background: "oklch(0.10 0.008 55)",
+            }}
+            role="toolbar"
+            aria-label="Filter online users"
+          >
+            <button
+              type="button"
+              data-ocid="online_users.filter.all"
+              onClick={() => handleFilterChange("all")}
+              className="px-2.5 py-1 text-[10px] font-semibold transition-colors"
+              style={
+                filter === "all"
+                  ? {
+                      background:
+                        "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                      color: "oklch(0.08 0.004 55)",
+                    }
+                  : { color: "oklch(0.55 0.04 55)" }
+              }
+              aria-pressed={filter === "all"}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              data-ocid="online_users.filter.conversations"
+              onClick={() => handleFilterChange("myConversations")}
+              className="px-2.5 py-1 text-[10px] font-semibold transition-colors"
+              style={
+                filter === "myConversations"
+                  ? {
+                      background:
+                        "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                      color: "oklch(0.08 0.004 55)",
+                    }
+                  : { color: "oklch(0.55 0.04 55)" }
+              }
+              aria-pressed={filter === "myConversations"}
+            >
+              My Chats
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Loading skeleton */}
+      {onlineLoading && (
+        <div className="grid grid-cols-3 gap-2">
+          {(["a", "b", "c", "d", "e", "f"] as const).map((k) => (
+            <div
+              key={k}
+              className="flex flex-col items-center gap-1.5 p-2.5 rounded-xl"
+              style={{ background: "oklch(0.14 0.006 55 / 0.6)" }}
+            >
+              <div
+                className="w-11 h-11 rounded-full animate-pulse"
+                style={{ background: "oklch(0.22 0.008 55)" }}
+              />
+              <div
+                className="h-2.5 w-12 rounded-full animate-pulse"
+                style={{ background: "oklch(0.22 0.008 55)" }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!onlineLoading && filteredOnline.length === 0 && (
+        <div
+          className="flex flex-col items-center justify-center py-5 gap-2"
+          data-ocid="online_users.empty_state"
+        >
+          <Wifi
+            className="h-6 w-6 opacity-25"
+            style={{ color: "oklch(0.72 0.19 145)" }}
+          />
+          <p className="text-xs text-muted-foreground/60 text-center">
+            {filter === "myConversations"
+              ? "None of your contacts are online"
+              : "No one online right now"}
+          </p>
+        </div>
+      )}
+
+      {/* User grid */}
+      {!onlineLoading && visibleOnline.length > 0 && (
+        <div className="grid grid-cols-3 gap-2">
+          {visibleOnline.map((user, idx) => (
+            <button
+              type="button"
+              key={user.userId}
+              data-ocid={`online_users.item.${idx + 1}`}
+              onClick={() => onStartChat?.(user.userId)}
+              className="group flex flex-col items-center gap-1.5 p-2.5 rounded-xl transition-all hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2"
+              style={{
+                background: "oklch(0.14 0.006 55 / 0.6)",
+                border: "1px solid oklch(0.20 0.007 55 / 0.8)",
+              }}
+              aria-label={`Start chat with ${user.displayName || user.username}`}
+              title={`Chat with @${user.username}`}
+            >
+              {/* Avatar with online dot */}
+              <div className="relative">
+                <Avatar className="w-11 h-11">
+                  {user.avatarUrl && (
+                    <AvatarImage src={user.avatarUrl} alt={user.displayName} />
+                  )}
+                  <AvatarFallback
+                    className="text-sm font-bold"
+                    style={{
+                      background: "oklch(0.76 0.13 72 / 0.2)",
+                      color: "oklch(0.82 0.15 72)",
+                    }}
+                  >
+                    {(user.displayName || user.username)
+                      .slice(0, 1)
+                      .toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                {/* Online indicator dot */}
+                <span
+                  className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-sidebar"
+                  style={{ background: "oklch(0.72 0.19 145)" }}
+                  aria-hidden="true"
+                />
+              </div>
+              {/* Username */}
+              <span
+                className="text-xs font-medium truncate w-full text-center leading-tight"
+                style={{ color: "oklch(0.85 0.01 55)" }}
+              >
+                {user.displayName || user.username}
+              </span>
+              {/* Chat icon on hover */}
+              <MessageCircle
+                className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity"
+                style={{ color: "oklch(0.72 0.19 145)" }}
+              />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* View more */}
+      {hasMoreOnline && (
+        <button
+          type="button"
+          data-ocid="online_users.pagination_next"
+          onClick={() => setOnlinePage((p) => p + 1)}
+          className="w-full mt-3 py-2.5 text-xs font-semibold text-center rounded-xl transition-colors hover:bg-muted/30"
+          style={{ color: "oklch(0.72 0.19 145)" }}
+        >
+          View more (
+          {Math.min(
+            ONLINE_PAGE_SIZE,
+            filteredOnline.length - onlinePage * ONLINE_PAGE_SIZE,
+          )}{" "}
+          more)
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ─── Main StatusView ─────────────────────────────────────────────────────────
 
 interface StatusViewProps {
   currentUserId: string;
   currentProfile: UserProfile | null;
+  enabled?: boolean;
   onStartChat?: (userId: string) => void;
   onSelectChannel?: (id: import("../hooks/useQueries").ChannelId) => void;
 }
@@ -832,6 +1214,7 @@ interface StatusViewProps {
 export default function StatusView({
   currentUserId,
   currentProfile,
+  enabled = true,
   onStartChat,
   onSelectChannel,
 }: StatusViewProps) {
@@ -847,8 +1230,8 @@ export default function StatusView({
   const [profileViewOpen, setProfileViewOpen] = useState(false);
   const [page, setPage] = useState(1);
 
-  const { data: myStatuses = [] } = useGetMyStatuses();
-  const { data: allStories = [] } = useGetAllStories();
+  const { data: myStatuses = [] } = useGetMyStatuses(enabled);
+  const { data: allStories = [] } = useGetAllStories(enabled);
 
   // Filter out current user's own stories from the all-stories list
   const otherStories = allStories.filter(
@@ -1041,6 +1424,13 @@ export default function StatusView({
           </p>
         </div>
       )}
+
+      {/* ─── Online Users Section ─────────────────────────────────────── */}
+      <OnlineUsersSection
+        enabled={enabled}
+        currentUserId={currentUserId}
+        onStartChat={onStartChat}
+      />
 
       <AddStatusModal open={addStatusOpen} onOpenChange={setAddStatusOpen} />
 

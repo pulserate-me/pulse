@@ -61,6 +61,14 @@ type ReplyToInfo =
    preview: text;
    senderUsername: text;
  };
+type OnlineUser = 
+ record {
+   avatarUrl: opt text;
+   displayName: text;
+   lastSeen: Timestamp;
+   userId: UserId;
+   username: text;
+ };
 type NotificationKind = 
  variant {
    channelFollowed: record {
@@ -144,6 +152,11 @@ type GoldTransaction =
    timestamp: Timestamp;
    txType: GoldTxType;
  };
+type FollowerSnapshot = 
+ record {
+   count: nat;
+   timestamp: int;
+ };
 type DealerInfo = 
  record {
    avatarUrl: opt text;
@@ -222,6 +235,16 @@ type AppNotification =
    read: bool;
    timestamp: Timestamp;
  };
+type AnalyticsSnapshot = 
+ record {
+   activeUsers: nat;
+   channelsCreated: nat;
+   goldVolume: float64;
+   messagesSent: nat;
+   storiesPosted: nat;
+   timestamp: int;
+   totalUsers: nat;
+ };
 service : {
   _immutableObjectStorageBlobsAreLive: (hashes: vec blob) -> (vec bool) query;
   _immutableObjectStorageBlobsToDelete: () -> (vec blob) query;
@@ -242,6 +265,13 @@ service : {
   adminClaimGold: (amount: nat) -> ();
   assignCallerUserRole: (user: principal, role: UserRole) -> ();
   blockUser: (targetUserId: UserId) -> ();
+  /// Claim 0.01 Pulse (100 units at ×10000 scale) from the charity pool once per 24 hours.
+  /// A 5% platform fee is applied: pool pays 100 units, fee (5 units) is
+  /// distributed proportionally to all Pulse holders, claimer receives 95 units (0.0095 Pulse).
+  claimDailyCharityPulse: () -> (variant {
+                                   err: text;
+                                   ok: nat;
+                                 });
   commentOnChannelPost: (postId: ChannelPostId, "text": text) ->
    (ChannelCommentId);
   commentOnStatus: (statusId: StatusId, "text": text) -> (CommentId);
@@ -255,6 +285,13 @@ service : {
   deleteGroupName: (conversationId: ConversationId) -> ();
   deleteHighlight: (statusId: StatusId) -> ();
   deleteMessage: (conversationId: ConversationId, messageId: MessageId) -> ();
+  /// Donate Pulse to the charity pool. Minimum 100 units (0.01 Pulse at ×10000 scale).
+  /// 5% platform fee is deducted from the donated amount and distributed
+  /// proportionally to all Pulse holders. The remaining 95% enters the pool.
+  donateToPulseCharity: (amount: nat) -> (variant {
+                                            err: text;
+                                            ok;
+                                          });
   editChannelPost: (postId: ChannelPostId, newContent: ChannelPostContent) ->
    ();
   editMessage: (conversationId: ConversationId, messageId: MessageId,
@@ -269,13 +306,25 @@ service : {
                               UserProfile;
                               vec Status;
                             }) query;
+  /// Returns analytics snapshots filtered to the given range.
+  /// Also triggers a new snapshot if more than 1 hour has passed since the last one.
+  /// range: "today" | "week" | "month" | "alltime"
+  getAnalyticsTrend: (range: text) -> (vec AnalyticsSnapshot);
   getCallerUserProfile: () -> (opt UserProfile) query;
   getCallerUserRole: () -> (UserRole) query;
   getChannel: (channelId: ChannelId) -> (opt ChannelWithMeta) query;
+  /// Returns follower count snapshots for the given channel.
+  /// Only the channel owner may call this.
+  getChannelFollowerHistory: (channelId: ChannelId) ->
+   (vec FollowerSnapshot) query;
   getChannelPostInteractions: (postId: ChannelPostId) ->
    (ChannelPostInteractions) query;
   getChannelPosts: (channelId: ChannelId) -> (vec ChannelPost) query;
   getChannelsByCategory: (category: text) -> (vec ChannelWithMeta) query;
+  /// Returns the caller's last charity claim timestamp (null if never claimed).
+  getCharityLastClaim: () -> (opt int) query;
+  /// Returns the current charity pool balance in raw units.
+  getCharityPoolBalance: () -> (nat) query;
   getContactStatuses: () -> (vec record {
                                    UserProfile;
                                    vec Status;
@@ -298,14 +347,24 @@ service : {
   getMessages: (conversationId: ConversationId, offset: nat, limit: nat) ->
    (vec Message) query;
   getMyBlockedUsers: () -> (vec UserProfile) query;
+  /// Returns (channelId, currentFollowerCount) for all channels owned by the caller.
+  getMyChannelFollowerCounts: () -> (vec record {
+                                           text;
+                                           nat;
+                                         }) query;
   getMyConversations: () -> (vec Conversation) query;
   getMyGoldBalance: () -> (nat) query;
   getMyGoldTransactions: () -> (vec GoldTransaction) query;
   getMyNotifications: () -> (vec AppNotification) query;
+  /// Returns the number of times the caller's profile has been viewed.
+  getMyProfileViewCount: () -> (nat) query;
   getMyStatuses: () -> (vec Status) query;
   getMyTransactionHistory: () -> (vec GoldTransaction) query;
+  getOnlineUsers: () -> (vec OnlineUser) query;
   getPaginatedMessages: (conversationId: ConversationId, offset: nat, limit:
    nat) -> (vec Message) query;
+  /// Returns the total number of profile views for a given userId (by username).
+  getProfileViewCount: (userId: text) -> (nat) query;
   getStatusInteractions: (statusId: StatusId) -> (StatusInteractions) query;
   getStoryViewers: (statusId: StatusId) -> (vec text) query;
   getStoryViewersList: (statusId: StatusId) -> (vec text) query;
@@ -322,6 +381,15 @@ service : {
   getTypingUsers: (convId: ConversationId) -> (vec text) query;
   getUnreadCount: (conversationId: ConversationId) -> (nat) query;
   getUserByPrincipal: (userId: UserId) -> (opt UserProfile) query;
+  /// Returns a user's basic profile by username (for Online Now avatars, etc.)
+  getUserByUsername: (username: text) ->
+   (opt
+     record {
+       avatarUrl: opt text;
+       displayName: text;
+       id: principal;
+       username: text;
+     }) query;
   getUserChannelsCreated: () -> (nat) query;
   getUserMessageCount: () -> (nat) query;
   getUserProfile: (userId: UserId) -> (opt UserProfile) query;
@@ -364,6 +432,8 @@ service : {
       ok;
     });
   recordChannelPostView: (postId: ChannelPostId) -> ();
+  /// Record that the caller viewed profileUserId's profile. Self-views are skipped.
+  recordProfileView: (profileUserId: text) -> ();
   recordStoryView: (statusId: StatusId) -> ();
   removeFromHighlights: (statusId: StatusId) -> (variant {
                                                    err: text;

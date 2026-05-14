@@ -7,6 +7,13 @@ export interface None {
     __kind__: "None";
 }
 export type Option<T> = Some<T> | None;
+export interface OnlineUser {
+    username: string;
+    displayName: string;
+    userId: UserId;
+    avatarUrl?: string;
+    lastSeen: Timestamp;
+}
 export interface ChannelWithMeta {
     ownerProfile: UserProfile;
     isFollowing: boolean;
@@ -25,6 +32,10 @@ export interface MessageContent {
     mediaUrl?: string;
     mediaType?: MediaType;
 }
+export interface FollowerSnapshot {
+    count: bigint;
+    timestamp: bigint;
+}
 export type ConversationId = bigint;
 export interface ChannelPost {
     id: ChannelPostId;
@@ -38,6 +49,15 @@ export interface ChannelCommentWithProfile {
     text: string;
     author: UserProfile;
     timestamp: Timestamp;
+}
+export interface AnalyticsSnapshot {
+    activeUsers: bigint;
+    channelsCreated: bigint;
+    messagesSent: bigint;
+    storiesPosted: bigint;
+    timestamp: bigint;
+    totalUsers: bigint;
+    goldVolume: number;
 }
 export type ChannelPostId = bigint;
 export interface ChannelPostContent {
@@ -184,14 +204,6 @@ export interface Status {
     author: UserId;
     timestamp: Timestamp;
 }
-export interface Conversation {
-    id: ConversationId;
-    lastMessageTimestamp: bigint;
-    members: Array<UserId>;
-    messages: Array<Message>;
-    type: ConversationType;
-    pinnedMessageId?: MessageId;
-}
 export interface MessageInput {
     content: MessageContent;
     replyToMessageId?: MessageId;
@@ -202,6 +214,14 @@ export interface UserProfile {
     displayName: string;
     avatarUrl?: string;
     lastSeen: Timestamp;
+}
+export interface Conversation {
+    id: ConversationId;
+    lastMessageTimestamp: bigint;
+    members: Array<UserId>;
+    messages: Array<Message>;
+    type: ConversationType;
+    pinnedMessageId?: MessageId;
 }
 export enum GoldTxType {
     buyRequest = "buyRequest",
@@ -223,6 +243,18 @@ export interface backendInterface {
     adminClaimGold(amount: bigint): Promise<void>;
     assignCallerUserRole(user: Principal, role: UserRole): Promise<void>;
     blockUser(targetUserId: UserId): Promise<void>;
+    /**
+     * / Claim 0.01 Pulse (100 units at ×10000 scale) from the charity pool once per 24 hours.
+     * / A 5% platform fee is applied: pool pays 100 units, fee (5 units) is
+     * / distributed proportionally to all Pulse holders, claimer receives 95 units (0.0095 Pulse).
+     */
+    claimDailyCharityPulse(): Promise<{
+        __kind__: "ok";
+        ok: bigint;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     commentOnChannelPost(postId: ChannelPostId, text: string): Promise<ChannelCommentId>;
     commentOnStatus(statusId: StatusId, text: string): Promise<CommentId>;
     createChannel(name: string, description: string, avatarUrl: string | null, category: string | null): Promise<ChannelId>;
@@ -233,6 +265,18 @@ export interface backendInterface {
     deleteGroupName(conversationId: ConversationId): Promise<void>;
     deleteHighlight(statusId: StatusId): Promise<void>;
     deleteMessage(conversationId: ConversationId, messageId: MessageId): Promise<void>;
+    /**
+     * / Donate Pulse to the charity pool. Minimum 100 units (0.01 Pulse at ×10000 scale).
+     * / 5% platform fee is deducted from the donated amount and distributed
+     * / proportionally to all Pulse holders. The remaining 95% enters the pool.
+     */
+    donateToPulseCharity(amount: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     editChannelPost(postId: ChannelPostId, newContent: ChannelPostContent): Promise<void>;
     editMessage(conversationId: ConversationId, messageId: MessageId, newText: string): Promise<void>;
     followChannel(channelId: ChannelId): Promise<void>;
@@ -241,12 +285,31 @@ export interface backendInterface {
     getAdminTotalClaimed(): Promise<bigint>;
     getAllChannels(): Promise<Array<ChannelWithMeta>>;
     getAllStories(): Promise<Array<[UserProfile, Array<Status>]>>;
+    /**
+     * / Returns analytics snapshots filtered to the given range.
+     * / Also triggers a new snapshot if more than 1 hour has passed since the last one.
+     * / range: "today" | "week" | "month" | "alltime"
+     */
+    getAnalyticsTrend(range: string): Promise<Array<AnalyticsSnapshot>>;
     getCallerUserProfile(): Promise<UserProfile | null>;
     getCallerUserRole(): Promise<UserRole>;
     getChannel(channelId: ChannelId): Promise<ChannelWithMeta | null>;
+    /**
+     * / Returns follower count snapshots for the given channel.
+     * / Only the channel owner may call this.
+     */
+    getChannelFollowerHistory(channelId: ChannelId): Promise<Array<FollowerSnapshot>>;
     getChannelPostInteractions(postId: ChannelPostId): Promise<ChannelPostInteractions>;
     getChannelPosts(channelId: ChannelId): Promise<Array<ChannelPost>>;
     getChannelsByCategory(category: string): Promise<Array<ChannelWithMeta>>;
+    /**
+     * / Returns the caller's last charity claim timestamp (null if never claimed).
+     */
+    getCharityLastClaim(): Promise<bigint | null>;
+    /**
+     * / Returns the current charity pool balance in raw units.
+     */
+    getCharityPoolBalance(): Promise<bigint>;
     getContactStatuses(): Promise<Array<[UserProfile, Array<Status>]>>;
     getConversation(conversationId: ConversationId): Promise<Conversation | null>;
     getGroupAvatars(): Promise<Array<[ConversationId, string]>>;
@@ -256,13 +319,26 @@ export interface backendInterface {
     getMessageReadReceipts(conversationId: ConversationId, messageId: MessageId): Promise<Array<MessageReadReceipt> | null>;
     getMessages(conversationId: ConversationId, offset: bigint, limit: bigint): Promise<Array<Message>>;
     getMyBlockedUsers(): Promise<Array<UserProfile>>;
+    /**
+     * / Returns (channelId, currentFollowerCount) for all channels owned by the caller.
+     */
+    getMyChannelFollowerCounts(): Promise<Array<[string, bigint]>>;
     getMyConversations(): Promise<Array<Conversation>>;
     getMyGoldBalance(): Promise<bigint>;
     getMyGoldTransactions(): Promise<Array<GoldTransaction>>;
     getMyNotifications(): Promise<Array<AppNotification>>;
+    /**
+     * / Returns the number of times the caller's profile has been viewed.
+     */
+    getMyProfileViewCount(): Promise<bigint>;
     getMyStatuses(): Promise<Array<Status>>;
     getMyTransactionHistory(): Promise<Array<GoldTransaction>>;
+    getOnlineUsers(): Promise<Array<OnlineUser>>;
     getPaginatedMessages(conversationId: ConversationId, offset: bigint, limit: bigint): Promise<Array<Message>>;
+    /**
+     * / Returns the total number of profile views for a given userId (by username).
+     */
+    getProfileViewCount(userId: string): Promise<bigint>;
     getStatusInteractions(statusId: StatusId): Promise<StatusInteractions>;
     getStoryViewers(statusId: StatusId): Promise<Array<string>>;
     getStoryViewersList(statusId: StatusId): Promise<Array<string>>;
@@ -278,6 +354,15 @@ export interface backendInterface {
     getTypingUsers(convId: ConversationId): Promise<Array<string>>;
     getUnreadCount(conversationId: ConversationId): Promise<bigint>;
     getUserByPrincipal(userId: UserId): Promise<UserProfile | null>;
+    /**
+     * / Returns a user's basic profile by username (for Online Now avatars, etc.)
+     */
+    getUserByUsername(username: string): Promise<{
+        id: Principal;
+        username: string;
+        displayName: string;
+        avatarUrl?: string;
+    } | null>;
     getUserChannelsCreated(): Promise<bigint>;
     getUserMessageCount(): Promise<bigint>;
     getUserProfile(userId: UserId): Promise<UserProfile | null>;
@@ -332,6 +417,10 @@ export interface backendInterface {
         err: string;
     }>;
     recordChannelPostView(postId: ChannelPostId): Promise<void>;
+    /**
+     * / Record that the caller viewed profileUserId's profile. Self-views are skipped.
+     */
+    recordProfileView(profileUserId: string): Promise<void>;
     recordStoryView(statusId: StatusId): Promise<void>;
     removeFromHighlights(statusId: StatusId): Promise<{
         __kind__: "ok";

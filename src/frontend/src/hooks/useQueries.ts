@@ -312,7 +312,7 @@ export function useAddStatus() {
   });
 }
 
-export function useGetMyStatuses() {
+export function useGetMyStatuses(enabled = true) {
   const { actor, isFetching } = useActor(createActor);
   return useQuery<Status[]>({
     queryKey: ["myStatuses"],
@@ -320,7 +320,7 @@ export function useGetMyStatuses() {
       if (!actor) return [];
       return actor.getMyStatuses();
     },
-    enabled: !!actor && !isFetching,
+    enabled: enabled && !!actor && !isFetching,
     refetchInterval: 30000,
   });
 }
@@ -338,7 +338,7 @@ export function useGetContactStatuses() {
   });
 }
 
-export function useGetAllStories() {
+export function useGetAllStories(enabled = true) {
   const { actor, isFetching } = useActor(createActor);
   return useQuery<Array<[UserProfile, Array<Status>]>>({
     queryKey: ["allStories"],
@@ -346,7 +346,7 @@ export function useGetAllStories() {
       if (!actor) return [];
       return actor.getAllStories();
     },
-    enabled: !!actor && !isFetching,
+    enabled: enabled && !!actor && !isFetching,
     refetchInterval: 30000,
   });
 }
@@ -459,7 +459,7 @@ export function useGetStatusInteractions(statusId: StatusId | null) {
 
 // ─── Channel hooks ────────────────────────────────────────────────────────────
 
-export function useGetAllChannels() {
+export function useGetAllChannels(enabled = true) {
   const { actor, isFetching } = useActor(createActor);
   return useQuery<ChannelWithMeta[]>({
     queryKey: ["channels"],
@@ -467,7 +467,7 @@ export function useGetAllChannels() {
       if (!actor) return [];
       return actor.getAllChannels();
     },
-    enabled: !!actor && !isFetching,
+    enabled: enabled && !!actor && !isFetching,
     refetchInterval: 15000,
   });
 }
@@ -814,7 +814,7 @@ export function useLeaveConversation() {
 import type { GoldTransaction } from "../backend.d";
 export type { GoldTransaction };
 
-export function useGetMyGoldBalance() {
+export function useGetMyGoldBalance(enabled = true) {
   const { actor, isFetching } = useActor(createActor);
   return useQuery<bigint>({
     queryKey: ["goldBalance"],
@@ -822,12 +822,12 @@ export function useGetMyGoldBalance() {
       if (!actor) return BigInt(0);
       return actor.getMyGoldBalance();
     },
-    enabled: !!actor && !isFetching,
+    enabled: enabled && !!actor && !isFetching,
     refetchInterval: 10000,
   });
 }
 
-export function useGetMyTransactionHistory() {
+export function useGetMyTransactionHistory(enabled = true) {
   const { actor, isFetching } = useActor(createActor);
   return useQuery<GoldTransaction[]>({
     queryKey: ["goldTransactions"],
@@ -835,7 +835,7 @@ export function useGetMyTransactionHistory() {
       if (!actor) return [];
       return actor.getMyTransactionHistory();
     },
-    enabled: !!actor && !isFetching,
+    enabled: enabled && !!actor && !isFetching,
     refetchInterval: 10000,
   });
 }
@@ -1244,7 +1244,7 @@ export function useGetUserGoldBalance() {
     queryFn: async () => {
       if (!actor) return 0;
       const raw = await actor.getMyGoldBalance();
-      return Number(raw) / 100;
+      return Number(raw) / 10000;
     },
     enabled: !!actor && !isFetching,
     refetchInterval: 30000,
@@ -1322,6 +1322,93 @@ export function useUnpinChannelPost(channelId: ChannelId | null) {
 }
 
 // ─── Gold Gift to Post / Story Hooks ─────────────────────────────────────────
+// ─── Charity Hooks ───────────────────────────────────────────────────────────
+
+export function useGetCharityPoolBalance(enabled = true) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["charityPool"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      return (
+        actor as ReturnType<typeof createActor> & {
+          getCharityPoolBalance: () => Promise<bigint>;
+        }
+      ).getCharityPoolBalance();
+    },
+    enabled: enabled && !!actor && !isFetching,
+    refetchInterval: 15000,
+  });
+}
+
+export function useGetCharityLastClaim(enabled = true) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint | null>({
+    queryKey: ["charityLastClaim"],
+    queryFn: async () => {
+      if (!actor) return null;
+      const result = await (
+        actor as ReturnType<typeof createActor> & {
+          getCharityLastClaim: () => Promise<[] | [bigint]>;
+        }
+      ).getCharityLastClaim();
+      // Motoko opt Int comes back as [] or [value]
+      if (Array.isArray(result) && result.length > 0)
+        return result[0] as bigint;
+      return null;
+    },
+    enabled: enabled && !!actor && !isFetching,
+    refetchInterval: 10000,
+  });
+}
+
+export function useDonateToPulseCharity() {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (amountRaw: bigint) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await (
+        actor as ReturnType<typeof createActor> & {
+          donateToPulseCharity: (
+            amount: bigint,
+          ) => Promise<{ __kind__: "ok" } | { __kind__: "err"; err: string }>;
+        }
+      ).donateToPulseCharity(amountRaw);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["goldBalance"] });
+      queryClient.invalidateQueries({ queryKey: ["goldTransactions"] });
+      queryClient.invalidateQueries({ queryKey: ["charityPool"] });
+    },
+  });
+}
+
+export function useClaimDailyCharityPulse() {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await (
+        actor as ReturnType<typeof createActor> & {
+          claimDailyCharityPulse: () => Promise<
+            { __kind__: "ok"; ok: bigint } | { __kind__: "err"; err: string }
+          >;
+        }
+      ).claimDailyCharityPulse();
+      if (result.__kind__ === "err") throw new Error(result.err);
+      return result.ok;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["goldBalance"] });
+      queryClient.invalidateQueries({ queryKey: ["goldTransactions"] });
+      queryClient.invalidateQueries({ queryKey: ["charityPool"] });
+      queryClient.invalidateQueries({ queryKey: ["charityLastClaim"] });
+    },
+  });
+}
 
 export function useRecordChannelPostView() {
   const { actor } = useActor(createActor);
@@ -1409,5 +1496,245 @@ export function useGetTypingUsers(convId: bigint | null) {
     },
     enabled: !!actor && !isFetching && convId !== null,
     refetchInterval: 3000,
+  });
+}
+
+// ─── Online Users Hook ───────────────────────────────────────────────────────
+// ─── Analytics Trend & Profile View Hooks ───────────────────────────────────
+
+export interface AnalyticsSnapshot {
+  timestamp: bigint;
+  totalUsers: bigint;
+  messagesSent: bigint;
+  goldVolume: number;
+  activeUsers: bigint;
+  channelsCreated: bigint;
+  storiesPosted: bigint;
+}
+
+export function useGetAnalyticsTrend(range: string) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<AnalyticsSnapshot[]>({
+    queryKey: ["analyticsTrend", range],
+    queryFn: async () => {
+      if (!actor) return [];
+      try {
+        return (
+          actor as ReturnType<typeof createActor> & {
+            getAnalyticsTrend: (range: string) => Promise<AnalyticsSnapshot[]>;
+          }
+        ).getAnalyticsTrend(range);
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetMyProfileViewCount() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<bigint>({
+    queryKey: ["myProfileViewCount"],
+    queryFn: async () => {
+      if (!actor) return BigInt(0);
+      try {
+        return (
+          actor as ReturnType<typeof createActor> & {
+            getMyProfileViewCount: () => Promise<bigint>;
+          }
+        ).getMyProfileViewCount();
+      } catch {
+        return BigInt(0);
+      }
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetMyChannelFollowerCounts() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<Array<[string, number]>>({
+    queryKey: ["myChannelFollowerCounts"],
+    queryFn: async () => {
+      if (!actor) return [];
+      try {
+        const raw = await (
+          actor as ReturnType<typeof createActor> & {
+            getMyChannelFollowerCounts: () => Promise<
+              Array<[string, bigint | number]>
+            >;
+          }
+        ).getMyChannelFollowerCounts();
+        return raw.map(([name, count]): [string, number] => [
+          name,
+          typeof count === "bigint" ? Number(count) : count,
+        ]);
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+export function useGetChannelFollowerHistory(channelId: string | null) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<Array<{ timestamp: bigint; count: number }>>({
+    queryKey: ["channelFollowerHistory", channelId],
+    queryFn: async () => {
+      if (!actor || !channelId) return [];
+      try {
+        return (
+          actor as ReturnType<typeof createActor> & {
+            getChannelFollowerHistory: (
+              channelId: string,
+            ) => Promise<Array<{ timestamp: bigint; count: number }>>;
+          }
+        ).getChannelFollowerHistory(channelId);
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!actor && !isFetching && !!channelId,
+    refetchInterval: 30000,
+  });
+}
+
+export function useRecordProfileView() {
+  const { actor } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      if (!actor) return;
+      try {
+        await (
+          actor as ReturnType<typeof createActor> & {
+            recordProfileView: (userId: string) => Promise<void>;
+          }
+        ).recordProfileView(userId);
+      } catch {
+        // silently fail — view recording is best-effort
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["myProfileViewCount"] });
+    },
+  });
+}
+
+export interface OnlineUser {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl?: string;
+  lastSeen: bigint;
+}
+
+export function useGetOnlineUsers(enabled = true) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<OnlineUser[]>({
+    queryKey: ["onlineUsers"],
+    queryFn: async () => {
+      if (!actor) return [];
+      try {
+        const raw = await actor.getOnlineUsers();
+        return raw.map((u) => {
+          // avatarUrl may arrive as an already-unwrapped optional string (from bindgen)
+          // or as a Motoko option array [string] | []. Handle both cases safely.
+          let avatarUrl: string | undefined;
+          const rawAvatar = (
+            u as unknown as { avatarUrl: string | [string] | [] | undefined }
+          ).avatarUrl;
+          if (typeof rawAvatar === "string" && rawAvatar.length > 0) {
+            avatarUrl = rawAvatar;
+          } else if (Array.isArray(rawAvatar) && rawAvatar.length > 0) {
+            avatarUrl = rawAvatar[0] as string;
+          }
+          return {
+            userId:
+              typeof u.userId === "string"
+                ? u.userId
+                : (u.userId as { toText(): string }).toText(),
+            username: u.username,
+            displayName: u.displayName,
+            avatarUrl,
+            lastSeen: u.lastSeen,
+          };
+        });
+      } catch {
+        return [];
+      }
+    },
+    enabled: enabled && !!actor && !isFetching,
+    refetchInterval: 30000,
+  });
+}
+
+/**
+ * Like useGetOnlineUsers but enriches any user whose avatarUrl is missing
+ * by fetching their full profile from getUserProfile. This ensures avatars
+ * always display in the Online Now section even when the presence snapshot
+ * doesn't include the latest avatar.
+ */
+export function useGetOnlineUsersWithProfiles(enabled = true) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<OnlineUser[]>({
+    queryKey: ["onlineUsersWithProfiles"],
+    queryFn: async () => {
+      if (!actor) return [];
+      try {
+        const raw = await actor.getOnlineUsers();
+        const onlineUsers: OnlineUser[] = raw.map((u) => {
+          let avatarUrl: string | undefined;
+          const rawAvatar = (
+            u as unknown as { avatarUrl: string | [string] | [] | undefined }
+          ).avatarUrl;
+          if (typeof rawAvatar === "string" && rawAvatar.length > 0) {
+            avatarUrl = rawAvatar;
+          } else if (Array.isArray(rawAvatar) && rawAvatar.length > 0) {
+            avatarUrl = rawAvatar[0] as string;
+          }
+          return {
+            userId:
+              typeof u.userId === "string"
+                ? u.userId
+                : (u.userId as { toText(): string }).toText(),
+            username: u.username,
+            displayName: u.displayName,
+            avatarUrl,
+            lastSeen: u.lastSeen,
+          };
+        });
+
+        // For users missing an avatar, fetch their full profile to get the latest avatarUrl
+        const enriched = await Promise.all(
+          onlineUsers.map(async (user) => {
+            if (user.avatarUrl) return user;
+            try {
+              const { Principal } = await import("@icp-sdk/core/principal");
+              const profile = await actor.getUserProfile(
+                Principal.fromText(user.userId),
+              );
+              if (profile?.avatarUrl) {
+                return { ...user, avatarUrl: profile.avatarUrl };
+              }
+            } catch {
+              // Profile fetch failed — return user as-is with fallback initial
+            }
+            return user;
+          }),
+        );
+
+        return enriched;
+      } catch {
+        return [];
+      }
+    },
+    enabled: enabled && !!actor && !isFetching,
+    refetchInterval: 30000,
   });
 }

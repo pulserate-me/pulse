@@ -1,10 +1,11 @@
-import { r as reactExports, u as useListUserConversations, a as useForwardChannelPost, j as jsxRuntimeExports, D as Dialog, b as DialogContent, c as DialogHeader, d as DialogTitle, S as Search, I as Input, e as ScrollArea, L as LoaderCircle, B as Button, f as ue, g as useGetUserProfile, A as Avatar, h as AvatarImage, i as AvatarFallback, k as useGetChannelPostInteractions, l as useLikeChannelPost, m as useUnlikeChannelPost, n as useCommentOnChannelPost, o as useDeleteChannelPost, p as useEditChannelPost, q as DropdownMenu, s as DropdownMenuTrigger, E as EllipsisVertical, t as DropdownMenuContent, v as DropdownMenuItem, w as SquarePen, T as Trash2, H as Heart, M as MessageCircle, x as Share2, y as Send, z as Textarea, C as AlertDialog, F as AlertDialogContent, G as AlertDialogHeader, J as AlertDialogTitle, K as AlertDialogDescription, N as AlertDialogFooter, O as AlertDialogCancel, P as AlertDialogAction, Q as useGetChannel, R as useGetChannelPosts, U as useFollowChannel, V as useUnfollowChannel, W as useAddChannelPost, X as useMediaUpload, Y as useDeleteChannel, Z as markChannelAsViewed, _ as Skeleton, $ as ArrowLeft, a0 as Users, a1 as Image, a2 as Video, a3 as Mic, a4 as useUpdateChannel, a5 as Camera, a6 as Label } from "./index-fErHtdWv.js";
+import { r as reactExports, u as useListUserConversations, a as useForwardChannelPost, b as useGetGroupAvatars, j as jsxRuntimeExports, D as Dialog, c as DialogContent, d as DialogHeader, e as DialogTitle, S as Search, I as Input, f as ScrollArea, L as LoaderCircle, B as Button, g as ue, h as useGetUserProfile, A as Avatar, i as AvatarImage, k as AvatarFallback, l as useGetChannelPostInteractions, m as useLikeChannelPost, n as useUnlikeChannelPost, o as useCommentOnChannelPost, p as useDeleteChannelPost, q as useEditChannelPost, s as useGiftGoldToPost, t as useRecordChannelPostView, v as useGetMyGoldBalance, w as useIcpPrice, x as DropdownMenu, y as DropdownMenuTrigger, E as EllipsisVertical, z as DropdownMenuContent, C as DropdownMenuItem, F as SquarePen, P as Pin, G as PinOff, T as Trash2, H as Heart, M as MessageCircle, J as Share2, K as Eye, N as Coins, O as Send, Q as Textarea, R as AlertDialog, U as AlertDialogContent, V as AlertDialogHeader, W as AlertDialogTitle, X as AlertDialogDescription, Y as AlertDialogFooter, Z as AlertDialogCancel, _ as AlertDialogAction, $ as useGetChannel, a0 as useGetChannelPosts, a1 as useFollowChannel, a2 as useUnfollowChannel, a3 as useAddChannelPost, a4 as useMediaUpload, a5 as usePinChannelPost, a6 as useUnpinChannelPost, a7 as useDeleteChannel, a8 as markChannelAsViewed, a9 as Skeleton, aa as ArrowLeft, ab as Users, ac as X, ad as Mic, ae as Image, af as Video, ag as Link, ah as useUpdateChannel, ai as Camera, aj as Label, ak as ChevronDown } from "./index-Bv8yIAb2.js";
 function getInitials$2(name) {
   return name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 }
 function ConvItem({
   conversation,
   currentUserId,
+  groupAvatarUrl,
   onSelect
 }) {
   var _a;
@@ -20,7 +21,7 @@ function ConvItem({
       className: "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-muted/50 transition-colors text-left",
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(Avatar, { className: "w-10 h-10 shrink-0", children: [
-          (otherProfile == null ? void 0 : otherProfile.avatarUrl) && /* @__PURE__ */ jsxRuntimeExports.jsx(AvatarImage, { src: otherProfile.avatarUrl, alt: name }),
+          isGroup && groupAvatarUrl ? /* @__PURE__ */ jsxRuntimeExports.jsx(AvatarImage, { src: groupAvatarUrl, alt: name }) : !isGroup && (otherProfile == null ? void 0 : otherProfile.avatarUrl) ? /* @__PURE__ */ jsxRuntimeExports.jsx(AvatarImage, { src: otherProfile.avatarUrl, alt: name }) : null,
           /* @__PURE__ */ jsxRuntimeExports.jsx(
             AvatarFallback,
             {
@@ -47,6 +48,14 @@ function ForwardPostModal({
   const [search, setSearch] = reactExports.useState("");
   const { data: conversations = [] } = useListUserConversations();
   const { mutateAsync: forwardPost, isPending } = useForwardChannelPost();
+  const { data: groupAvatarsData } = useGetGroupAvatars();
+  const groupAvatarMap = reactExports.useMemo(() => {
+    const m = /* @__PURE__ */ new Map();
+    for (const [id, url] of groupAvatarsData ?? []) {
+      m.set(id.toString(), url);
+    }
+    return m;
+  }, [groupAvatarsData]);
   const filtered = conversations.filter((c) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -97,6 +106,7 @@ function ForwardPostModal({
           {
             conversation: conv,
             currentUserId,
+            groupAvatarUrl: conv.type.__kind__ === "group" ? groupAvatarMap.get(conv.id.toString()) : void 0,
             onSelect: () => handleForward(conv.id)
           },
           conv.id.toString()
@@ -130,6 +140,136 @@ function formatTime(ts) {
   if (diff < 864e5) return `${Math.floor(diff / 36e5)}h ago`;
   return new Date(ms).toLocaleDateString();
 }
+function extractYouTubeId(url) {
+  const pattern = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([^&?/\s]+)/;
+  const m = url.match(pattern);
+  return m ? m[1] : null;
+}
+function extractTikTokId(url) {
+  const m = url.match(/\/video\/(\d+)/);
+  return m ? m[1] : null;
+}
+function TikTokEmbed({ url }) {
+  const videoId = extractTikTokId(url);
+  const [loading, setLoading] = reactExports.useState(false);
+  const [failed, setFailed] = reactExports.useState(false);
+  const containerRef = reactExports.useRef(null);
+  const injectedRef = reactExports.useRef(false);
+  reactExports.useEffect(() => {
+    if (videoId) return;
+    if (injectedRef.current) return;
+    injectedRef.current = true;
+    setLoading(true);
+    setFailed(false);
+    fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`).then((r) => r.json()).then((data) => {
+      if (data.html && containerRef.current) {
+        containerRef.current.innerHTML = data.html;
+      } else {
+        setFailed(true);
+      }
+    }).catch(() => setFailed(true)).finally(() => setLoading(false));
+  }, [url, videoId]);
+  if (videoId) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "div",
+      {
+        className: "w-full overflow-hidden rounded-xl",
+        style: { maxHeight: 560 },
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "iframe",
+          {
+            src: `https://www.tiktok.com/embed/v2/${videoId}`,
+            className: "w-full",
+            style: { height: 560, border: "none" },
+            allow: "autoplay; encrypted-media",
+            allowFullScreen: true,
+            title: "TikTok video",
+            scrolling: "no"
+          }
+        )
+      }
+    );
+  }
+  if (loading) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "div",
+      {
+        className: "w-full rounded-xl flex items-center justify-center py-8",
+        style: { background: "oklch(0.18 0.02 240)" },
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+          LoaderCircle,
+          {
+            className: "h-6 w-6 animate-spin",
+            style: { color: "oklch(0.82 0.15 72)" }
+          }
+        )
+      }
+    );
+  }
+  if (failed) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "div",
+      {
+        className: "w-full rounded-xl p-4 flex items-center gap-3",
+        style: {
+          background: "oklch(0.18 0.02 240)",
+          border: "1px solid oklch(0.28 0.02 240)"
+        },
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "div",
+            {
+              className: "w-10 h-10 rounded-lg flex items-center justify-center shrink-0",
+              style: { background: "oklch(0.12 0.01 240)" },
+              children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-white font-bold text-sm", children: "TT" })
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-foreground", children: "TikTok Video" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground truncate", children: url })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: url, target: "_blank", rel: "noopener noreferrer", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { size: "sm", variant: "outline", className: "shrink-0 text-xs", children: "Watch" }) })
+        ]
+      }
+    );
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: containerRef, className: "w-full rounded-xl overflow-hidden" });
+}
+function XEmbedCard({ url }) {
+  const containerRef = reactExports.useRef(null);
+  const injectedRef = reactExports.useRef(false);
+  reactExports.useEffect(() => {
+    if (injectedRef.current || !containerRef.current) return;
+    injectedRef.current = true;
+    fetch(
+      `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`
+    ).then((r) => r.json()).then((data) => {
+      var _a;
+      if (!containerRef.current || !data.html) return;
+      containerRef.current.innerHTML = data.html;
+      if ((_a = window.twttr) == null ? void 0 : _a.widgets) {
+        window.twttr.widgets.load(containerRef.current);
+      } else {
+        const script = document.createElement("script");
+        script.src = "https://platform.twitter.com/widgets.js";
+        script.async = true;
+        script.charset = "utf-8";
+        document.head.appendChild(script);
+      }
+    }).catch(() => {
+      if (containerRef.current) {
+        containerRef.current.innerHTML = `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:inherit">View post on X</a>`;
+      }
+    });
+  }, [url]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "div",
+    {
+      ref: containerRef,
+      className: "px-1 pb-1 [&_iframe]:max-w-full [&_.twitter-tweet]:mx-0"
+    }
+  );
+}
 function ChannelPostCard({
   post,
   authorName,
@@ -138,24 +278,80 @@ function ChannelPostCard({
   isPostAuthor,
   currentUserId,
   channelId,
-  index
+  index,
+  isPinned = false,
+  onPin,
+  onUnpin
 }) {
-  var _a;
+  var _a, _b;
   const [showComments, setShowComments] = reactExports.useState(false);
   const [commentText, setCommentText] = reactExports.useState("");
   const [forwardOpen, setForwardOpen] = reactExports.useState(false);
   const [editOpen, setEditOpen] = reactExports.useState(false);
   const [editText, setEditText] = reactExports.useState(post.content.text);
   const [deleteOpen, setDeleteOpen] = reactExports.useState(false);
+  const [showFullText, setShowFullText] = reactExports.useState(false);
+  const [giftOpen, setGiftOpen] = reactExports.useState(false);
+  const [giftAmount, setGiftAmount] = reactExports.useState("");
+  const [giftError, setGiftError] = reactExports.useState("");
+  const [giftCurrency, setGiftCurrency] = reactExports.useState("gold");
   const { data: interactions } = useGetChannelPostInteractions(post.id);
   const likePost = useLikeChannelPost();
   const unlikePost = useUnlikeChannelPost();
   const commentOnPost = useCommentOnChannelPost();
   const deletePost = useDeleteChannelPost(channelId);
   const editPost = useEditChannelPost(channelId);
+  const giftGold = useGiftGoldToPost();
+  const recordView = useRecordChannelPostView();
+  const { data: rawBalance } = useGetMyGoldBalance();
+  const { price: icpPrice, loading: icpPriceLoading } = useIcpPrice();
   const likeCount = Number((interactions == null ? void 0 : interactions.likeCount) ?? 0);
   const likedByMe = (interactions == null ? void 0 : interactions.likedByMe) ?? false;
   const comments = (interactions == null ? void 0 : interactions.comments) ?? [];
+  const viewCount = Number((interactions == null ? void 0 : interactions.viewCount) ?? 0);
+  const goldBalance = rawBalance !== void 0 ? Number(rawBalance) / 1e4 : null;
+  reactExports.useEffect(() => {
+    recordView.mutate(post.id);
+  }, [post.id]);
+  const handleGiftGold = async () => {
+    const rawAmt = Number.parseFloat(giftAmount);
+    if (Number.isNaN(rawAmt) || !rawAmt) {
+      setGiftError("Please enter a valid amount");
+      return;
+    }
+    const goldAmt = giftCurrency === "usd" ? icpPrice != null ? rawAmt / icpPrice : null : rawAmt;
+    if (goldAmt === null) {
+      setGiftError("Price unavailable, please try again");
+      return;
+    }
+    if (goldAmt < 0.01) {
+      if (giftCurrency === "usd" && icpPrice != null) {
+        setGiftError(
+          `Minimum gift is 0.01 Pulse (≈ $${(0.01 * icpPrice).toFixed(4)})`
+        );
+      } else {
+        setGiftError("Minimum gift is 0.01 Pulse");
+      }
+      return;
+    }
+    if (goldBalance !== null && goldBalance < goldAmt) {
+      setGiftError("Insufficient Pulse balance");
+      return;
+    }
+    setGiftError("");
+    try {
+      await giftGold.mutateAsync({
+        postId: post.id,
+        amount: BigInt(Math.round(goldAmt * 1e4))
+      });
+      ue.success(`Gifted ${goldAmt.toFixed(4)} Pulse successfully!`);
+      setGiftOpen(false);
+      setGiftAmount("");
+      setGiftCurrency("gold");
+    } catch (err) {
+      ue.error(err instanceof Error ? err.message : "Failed to gift Pulse");
+    }
+  };
   const handleLike = () => {
     if (likedByMe) {
       unlikePost.mutate(post.id);
@@ -191,6 +387,7 @@ function ChannelPostCard({
     }
   };
   const mediaKind = (_a = post.content.mediaType) == null ? void 0 : _a.__kind__;
+  const embedVariant = mediaKind === "other" ? (_b = post.content.mediaType) == null ? void 0 : _b.other : null;
   const ocid = index + 1;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "article",
@@ -217,7 +414,7 @@ function ChannelPostCard({
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-foreground", children: authorName }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: formatTime(post.timestamp) })
           ] }),
-          isPostAuthor && /* @__PURE__ */ jsxRuntimeExports.jsxs(DropdownMenu, { children: [
+          (isPostAuthor || isOwner) && /* @__PURE__ */ jsxRuntimeExports.jsxs(DropdownMenu, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxRuntimeExports.jsx(
               Button,
               {
@@ -229,7 +426,7 @@ function ChannelPostCard({
               }
             ) }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs(DropdownMenuContent, { align: "end", className: "bg-card border-border", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              isPostAuthor && /* @__PURE__ */ jsxRuntimeExports.jsxs(
                 DropdownMenuItem,
                 {
                   onClick: () => {
@@ -244,7 +441,31 @@ function ChannelPostCard({
                   ]
                 }
               ),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              isOwner && onPin && !isPinned && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                DropdownMenuItem,
+                {
+                  onClick: () => onPin(post.id),
+                  className: "cursor-pointer",
+                  "data-ocid": `channel.post.pin_button.${ocid}`,
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Pin, { className: "h-4 w-4 mr-2" }),
+                    "Pin Post"
+                  ]
+                }
+              ),
+              isOwner && onUnpin && isPinned && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                DropdownMenuItem,
+                {
+                  onClick: () => onUnpin(),
+                  className: "cursor-pointer",
+                  "data-ocid": `channel.post.unpin_button.${ocid}`,
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(PinOff, { className: "h-4 w-4 mr-2" }),
+                    "Unpin Post"
+                  ]
+                }
+              ),
+              isPostAuthor && /* @__PURE__ */ jsxRuntimeExports.jsxs(
                 DropdownMenuItem,
                 {
                   onClick: () => setDeleteOpen(true),
@@ -259,17 +480,33 @@ function ChannelPostCard({
             ] })
           ] })
         ] }),
-        post.content.text && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "px-4 pb-3 text-sm text-foreground/90 leading-relaxed", children: post.content.text }),
-        post.content.mediaUrl && mediaKind === "image" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        post.content.text && (() => {
+          const words = post.content.text.trim().split(/\s+/);
+          const isLong = words.length > 69;
+          const displayText = isLong && !showFullText ? `${words.slice(0, 69).join(" ")}…` : post.content.text;
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-4 pb-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap", children: displayText }),
+            isLong && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => setShowFullText(!showFullText),
+                className: "text-xs font-semibold mt-1",
+                style: { color: "oklch(0.82 0.15 72)" },
+                children: showFullText ? "Show less" : "Read more"
+              }
+            )
+          ] });
+        })(),
+        post.content.mediaUrl && mediaKind === "image" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
           "img",
           {
             src: post.content.mediaUrl,
             alt: "Post media",
             className: "w-full max-h-80 object-cover"
           }
-        ),
-        post.content.mediaUrl && mediaKind === "video" && // biome-ignore lint/a11y/useMediaCaption: user-uploaded content
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
+        ) }),
+        post.content.mediaUrl && mediaKind === "video" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
           "video",
           {
             src: post.content.mediaUrl,
@@ -280,16 +517,24 @@ function ChannelPostCard({
             className: "w-full max-h-80 object-cover",
             style: { WebkitTransform: "translateZ(0)" }
           }
-        ),
-        post.content.mediaUrl && mediaKind === "audio" && // biome-ignore lint/a11y/useMediaCaption: user-uploaded content
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "audio",
-          {
-            src: post.content.mediaUrl,
-            controls: true,
-            className: "w-full px-4 pb-3"
-          }
-        ),
+        ) }),
+        post.content.mediaUrl && mediaKind === "audio" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-4 pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx("audio", { src: post.content.mediaUrl, controls: true, className: "w-full" }) }),
+        post.content.mediaUrl && mediaKind === "other" && embedVariant === "embedYouTube" && (() => {
+          const videoId = extractYouTubeId(post.content.mediaUrl);
+          if (!videoId) return null;
+          return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-4 pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-full overflow-hidden rounded-xl", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "iframe",
+            {
+              src: `https://www.youtube.com/embed/${videoId}`,
+              className: "w-full aspect-video",
+              allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture",
+              allowFullScreen: true,
+              title: "YouTube video"
+            }
+          ) }) });
+        })(),
+        post.content.mediaUrl && mediaKind === "other" && embedVariant === "embedTikTok" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-4 pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(TikTokEmbed, { url: post.content.mediaUrl }) }),
+        post.content.mediaUrl && mediaKind === "other" && embedVariant === "embedX" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "px-4 pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(XEmbedCard, { url: post.content.mediaUrl }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1 px-3 py-2 border-t border-border/50", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
@@ -297,7 +542,7 @@ function ChannelPostCard({
               type: "button",
               "data-ocid": `channel.post.toggle.${ocid}`,
               onClick: handleLike,
-              disabled: isOwner,
+              disabled: isPostAuthor,
               className: "flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-40",
               "aria-label": likedByMe ? "Unlike" : "Like",
               children: [
@@ -340,6 +585,44 @@ function ChannelPostCard({
               "aria-label": "Forward",
               children: /* @__PURE__ */ jsxRuntimeExports.jsx(Share2, { className: "h-4 w-4 text-muted-foreground" })
             }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "div",
+            {
+              className: "flex items-center gap-1 px-2 py-1.5",
+              "data-ocid": `channel.post.view_count.${ocid}`,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Eye,
+                  {
+                    className: "h-3.5 w-3.5",
+                    style: { color: "oklch(0.55 0.02 55)" }
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs", style: { color: "oklch(0.55 0.02 55)" }, children: viewCount })
+              ]
+            }
+          ),
+          !isPostAuthor && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              "data-ocid": `channel.post.gift_button.${ocid}`,
+              onClick: () => {
+                setGiftOpen(true);
+                setGiftAmount("");
+                setGiftError("");
+              },
+              className: "flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors ml-auto",
+              "aria-label": "Gift Pulse",
+              children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                Coins,
+                {
+                  className: "h-4 w-4",
+                  style: { color: "oklch(0.82 0.15 72)" }
+                }
+              )
+            }
           )
         ] }),
         showComments && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "border-t border-border/50 px-4 py-3 flex flex-col gap-3", children: [
@@ -376,7 +659,7 @@ function ChannelPostCard({
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-foreground/80", children: c.text })
             ] })
           ] }, String(c.id))) }),
-          !isOwner && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+          !isPostAuthor && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               Input,
               {
@@ -459,6 +742,196 @@ function ChannelPostCard({
             ]
           }
         ) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Dialog,
+          {
+            open: giftOpen,
+            onOpenChange: (open) => {
+              setGiftOpen(open);
+              if (!open) {
+                setGiftAmount("");
+                setGiftError("");
+                setGiftCurrency("gold");
+              }
+            },
+            children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              DialogContent,
+              {
+                "data-ocid": `channel.post.gift.dialog.${ocid}`,
+                className: "bg-card border-border max-w-sm",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(DialogHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    DialogTitle,
+                    {
+                      className: "font-display flex items-center gap-2",
+                      style: { color: "oklch(0.82 0.15 72)" },
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          Coins,
+                          {
+                            className: "h-5 w-5",
+                            style: { color: "oklch(0.82 0.15 72)" }
+                          }
+                        ),
+                        "Gift Pulse"
+                      ]
+                    }
+                  ) }),
+                  goldBalance !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground -mt-1", children: [
+                    "Your balance:",
+                    " ",
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                      "span",
+                      {
+                        className: "font-semibold",
+                        style: { color: "oklch(0.82 0.15 72)" },
+                        children: [
+                          goldBalance.toFixed(4),
+                          " Pulse"
+                        ]
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "div",
+                    {
+                      className: "flex rounded-lg overflow-hidden border",
+                      style: { borderColor: "oklch(0.82 0.15 72 / 0.25)" },
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          "button",
+                          {
+                            type: "button",
+                            onClick: () => {
+                              setGiftCurrency("gold");
+                              setGiftAmount("");
+                              setGiftError("");
+                            },
+                            className: "flex-1 py-1.5 text-xs font-semibold transition-colors",
+                            style: giftCurrency === "gold" ? {
+                              background: "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                              color: "oklch(0.08 0.004 55)"
+                            } : {
+                              background: "oklch(0.10 0.01 55)",
+                              color: "oklch(0.55 0.04 55)"
+                            },
+                            "data-ocid": `channel.post.gift.tab_gold.${ocid}`,
+                            children: "✦ Pulse"
+                          }
+                        ),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          "button",
+                          {
+                            type: "button",
+                            onClick: () => {
+                              setGiftCurrency("usd");
+                              setGiftAmount("");
+                              setGiftError("");
+                            },
+                            className: "flex-1 py-1.5 text-xs font-semibold transition-colors",
+                            style: giftCurrency === "usd" ? {
+                              background: "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                              color: "oklch(0.08 0.004 55)"
+                            } : {
+                              background: "oklch(0.10 0.01 55)",
+                              color: "oklch(0.55 0.04 55)"
+                            },
+                            "data-ocid": `channel.post.gift.tab_usd.${ocid}`,
+                            children: "$ USD"
+                          }
+                        )
+                      ]
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-2 mt-1", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
+                      giftCurrency === "usd" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "span",
+                        {
+                          className: "absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none",
+                          style: { color: "oklch(0.82 0.15 72)" },
+                          children: "$"
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        Input,
+                        {
+                          "data-ocid": `channel.post.gift.input.${ocid}`,
+                          type: "number",
+                          min: "0.01",
+                          step: "0.0001",
+                          placeholder: "0.0100",
+                          value: giftAmount,
+                          onChange: (e) => {
+                            setGiftAmount(e.target.value);
+                            setGiftError("");
+                          },
+                          className: `bg-input border-border${giftCurrency === "usd" ? " pl-7" : ""}`,
+                          style: {
+                            borderColor: giftError ? "oklch(0.65 0.25 25)" : void 0
+                          }
+                        }
+                      )
+                    ] }),
+                    giftAmount && !Number.isNaN(Number.parseFloat(giftAmount)) && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs", style: { color: "oklch(0.65 0.05 72)" }, children: icpPriceLoading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "h-3 w-3 animate-spin" }),
+                      " Loading price…"
+                    ] }) : icpPrice != null ? giftCurrency === "gold" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                      "≈ $",
+                      (Number.parseFloat(giftAmount) * icpPrice).toFixed(2),
+                      " ",
+                      "USD"
+                    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                      "≈ ",
+                      (Number.parseFloat(giftAmount) / icpPrice).toFixed(4),
+                      " ",
+                      "Pulse"
+                    ] }) : "Price unavailable" }),
+                    giftError && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "p",
+                      {
+                        className: "text-xs",
+                        style: { color: "oklch(0.65 0.25 25)" },
+                        "data-ocid": `channel.post.gift.error_state.${ocid}`,
+                        children: giftError
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-end gap-2 mt-1", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Button,
+                      {
+                        variant: "ghost",
+                        onClick: () => setGiftOpen(false),
+                        disabled: giftGold.isPending,
+                        "data-ocid": `channel.post.gift.cancel_button.${ocid}`,
+                        children: "Cancel"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Button,
+                      {
+                        onClick: handleGiftGold,
+                        disabled: giftGold.isPending || !giftAmount || icpPriceLoading && giftCurrency === "usd" || (() => {
+                          const raw = Number.parseFloat(giftAmount);
+                          if (!raw || Number.isNaN(raw)) return true;
+                          const gold = giftCurrency === "usd" ? icpPrice != null ? raw / icpPrice : null : raw;
+                          return gold === null || gold < 0.01;
+                        })(),
+                        "data-ocid": `channel.post.gift.submit_button.${ocid}`,
+                        style: {
+                          background: "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                          color: "oklch(0.08 0.004 55)"
+                        },
+                        children: giftGold.isPending ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "h-4 w-4 animate-spin" }) : "Send Pulse"
+                      }
+                    )
+                  ] })
+                ]
+              }
+            )
+          }
+        ),
         /* @__PURE__ */ jsxRuntimeExports.jsx(AlertDialog, { open: deleteOpen, onOpenChange: setDeleteOpen, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(AlertDialogContent, { className: "bg-card border-border", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(AlertDialogHeader, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(AlertDialogTitle, { children: "Delete Post" }),
@@ -495,16 +968,37 @@ const POSTS_PAGE_SIZE = 9;
 function getInitials(name) {
   return name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 }
+function detectEmbedPlatform(url) {
+  if (url.includes("youtube.com/watch") || url.includes("youtu.be/") || url.includes("youtube.com/shorts/"))
+    return "youtube";
+  if (url.includes("twitter.com/") || url.includes("x.com/")) return "x";
+  if (url.includes("tiktok.com/") || url.includes("vt.tiktok.com"))
+    return "tiktok";
+  return null;
+}
+const CHANNEL_CATEGORIES = [
+  "Music",
+  "Finance",
+  "Sports",
+  "News",
+  "Entertainment",
+  "Technology",
+  "Health",
+  "Education",
+  "Other"
+];
 function EditChannelModal({
   open,
   onOpenChange,
   channelId,
   initialName,
   initialDescription,
-  initialAvatarUrl
+  initialAvatarUrl,
+  initialCategory
 }) {
   const [name, setName] = reactExports.useState(initialName);
   const [description, setDescription] = reactExports.useState(initialDescription);
+  const [category, setCategory] = reactExports.useState(initialCategory ?? "");
   const [avatarPreview, setAvatarPreview] = reactExports.useState(
     initialAvatarUrl ?? null
   );
@@ -525,7 +1019,8 @@ function EditChannelModal({
         channelId,
         name: name.trim(),
         description: description.trim(),
-        avatarUrl
+        avatarUrl,
+        category: category || void 0
       });
       ue.success("Channel updated");
       onOpenChange(false);
@@ -621,6 +1116,48 @@ function EditChannelModal({
                 maxLength: 300
               }
             )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-1.5", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label, { className: "text-sm text-muted-foreground", children: "Category" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "select",
+                {
+                  "data-ocid": "channel.edit.category_select",
+                  value: category,
+                  onChange: (e) => setCategory(e.target.value),
+                  disabled: isBusy,
+                  className: "w-full h-9 rounded-md px-3 pr-8 text-sm appearance-none cursor-pointer focus:outline-none focus:ring-1",
+                  style: {
+                    background: "oklch(0.16 0.015 55)",
+                    border: "1px solid oklch(0.3 0.01 55)",
+                    color: category ? "oklch(0.9 0.01 55)" : "oklch(0.5 0.02 55)"
+                  },
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "No category" }),
+                    CHANNEL_CATEGORIES.map((cat) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "option",
+                      {
+                        value: cat,
+                        style: {
+                          background: "oklch(0.16 0.015 55)",
+                          color: "oklch(0.9 0.01 55)"
+                        },
+                        children: cat
+                      },
+                      cat
+                    ))
+                  ]
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                ChevronDown,
+                {
+                  className: "absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none",
+                  style: { color: "oklch(0.5 0.02 55)" }
+                }
+              )
+            ] })
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-end gap-2", children: [
@@ -657,12 +1194,15 @@ function ChannelView({
   currentUserId,
   onBack
 }) {
+  var _a;
   const { data: channelMeta, isLoading: channelLoading } = useGetChannel(channelId);
   const { data: posts = [], isLoading: postsLoading } = useGetChannelPosts(channelId);
   const { mutate: follow, isPending: following } = useFollowChannel();
   const { mutate: unfollow, isPending: unfollowing } = useUnfollowChannel();
   const { mutateAsync: addPost, isPending: posting } = useAddChannelPost(channelId);
   const { uploadMedia, isUploading } = useMediaUpload();
+  const { mutate: pinPost } = usePinChannelPost(channelId);
+  const { mutate: unpinPost } = useUnpinChannelPost(channelId);
   const [postText, setPostText] = reactExports.useState("");
   const [pendingMedia, setPendingMedia] = reactExports.useState(null);
   const [editOpen, setEditOpen] = reactExports.useState(false);
@@ -671,11 +1211,111 @@ function ChannelView({
   const { mutateAsync: deleteChannel, isPending: deleting } = useDeleteChannel();
   const imageRef = reactExports.useRef(null);
   const videoRef = reactExports.useRef(null);
-  const audioRef = reactExports.useRef(null);
+  const mediaRecorderRef = reactExports.useRef(null);
+  const recordingChunksRef = reactExports.useRef([]);
+  const recordingTimerRef = reactExports.useRef(null);
+  const [isRecording, setIsRecording] = reactExports.useState(false);
+  const [recordingSeconds, setRecordingSeconds] = reactExports.useState(0);
+  const [showEmbedInput, setShowEmbedInput] = reactExports.useState(false);
+  const [embedUrl, setEmbedUrl] = reactExports.useState("");
   reactExports.useEffect(() => {
     markChannelAsViewed(channelId.toString());
   }, [channelId]);
+  reactExports.useEffect(() => {
+    return () => {
+      var _a2;
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (((_a2 = mediaRecorderRef.current) == null ? void 0 : _a2.state) === "recording") {
+        mediaRecorderRef.current.stop();
+        for (const t of mediaRecorderRef.current.stream.getTracks()) {
+          t.stop();
+        }
+      }
+    };
+  }, []);
   const isBusy = posting || isUploading;
+  const detectedPlatform = embedUrl.trim() ? detectEmbedPlatform(embedUrl.trim()) : null;
+  const startRecording = reactExports.useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/ogg";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recordingChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1e3);
+    } catch {
+      ue.error("Microphone access denied");
+    }
+  }, []);
+  const stopRecording = reactExports.useCallback(() => {
+    var _a2;
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (((_a2 = mediaRecorderRef.current) == null ? void 0 : _a2.state) === "recording") {
+      mediaRecorderRef.current.stop();
+      for (const t of mediaRecorderRef.current.stream.getTracks()) {
+        t.stop();
+      }
+    }
+    setIsRecording(false);
+    setRecordingSeconds(0);
+  }, []);
+  const cancelRecording = reactExports.useCallback(() => {
+    stopRecording();
+    recordingChunksRef.current = [];
+  }, [stopRecording]);
+  const sendRecording = reactExports.useCallback(async () => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+    await new Promise((resolve) => {
+      recorder.onstop = () => resolve();
+      if (recorder.state === "recording") {
+        recorder.stop();
+        for (const t of recorder.stream.getTracks()) {
+          t.stop();
+        }
+      } else {
+        resolve();
+      }
+    });
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+    setRecordingSeconds(0);
+    const mimeType = recorder.mimeType || "audio/webm";
+    const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+    recordingChunksRef.current = [];
+    const ext = mimeType.includes("ogg") ? "ogg" : "webm";
+    const audioFile = new File([blob], `audio_recording.${ext}`, {
+      type: mimeType
+    });
+    try {
+      const result = await uploadMedia(audioFile);
+      await addPost({
+        text: postText.trim(),
+        mediaUrl: result.url,
+        mediaType: result.mediaType
+      });
+      setPostText("");
+      setPendingMedia(null);
+      setPostsPage(1);
+      ue.success("Post published!");
+    } catch {
+      ue.error("Failed to publish post");
+    }
+  }, [addPost, uploadMedia, postText]);
   if (channelLoading) {
     return /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "div",
@@ -707,6 +1347,9 @@ function ChannelView({
   }
   const { channel, followerCount, isFollowing, ownerProfile } = channelMeta;
   const isOwner = channel.owner.toString() === currentUserId;
+  const rawPinnedPost = channel == null ? void 0 : channel.pinnedPostId;
+  const pinnedPostId = rawPinnedPost == null ? null : Array.isArray(rawPinnedPost) ? rawPinnedPost.length > 0 ? rawPinnedPost[0] ?? null : null : rawPinnedPost;
+  const pinnedPost = pinnedPostId ? posts.find((p) => p.id === pinnedPostId) ?? null : null;
   const handleFollowToggle = () => {
     if (isFollowing) {
       unfollow(channelId);
@@ -715,11 +1358,23 @@ function ChannelView({
     }
   };
   const handlePost = async () => {
-    if (!postText.trim() && !pendingMedia) return;
+    const hasEmbed = embedUrl.trim() && detectedPlatform;
+    if (!postText.trim() && !pendingMedia && !hasEmbed) return;
     try {
       let mediaUrl;
       let mediaType;
-      if (pendingMedia) {
+      if (hasEmbed) {
+        mediaUrl = embedUrl.trim();
+        const platformMap = {
+          youtube: "embedYouTube",
+          x: "embedX",
+          tiktok: "embedTikTok"
+        };
+        mediaType = {
+          __kind__: "other",
+          other: platformMap[detectedPlatform]
+        };
+      } else if (pendingMedia) {
         const result = await uploadMedia(pendingMedia);
         mediaUrl = result.url;
         mediaType = result.mediaType;
@@ -731,11 +1386,18 @@ function ChannelView({
       });
       setPostText("");
       setPendingMedia(null);
+      setEmbedUrl("");
+      setShowEmbedInput(false);
       setPostsPage(1);
       ue.success("Post published!");
     } catch {
       ue.error("Failed to publish post");
     }
+  };
+  const formatRecordingTime = (secs) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
   };
   const sortedPosts = [...posts].sort(
     (a, b) => Number(b.timestamp) - Number(a.timestamp)
@@ -911,8 +1573,8 @@ function ChannelView({
               placeholder: "Share something with your followers...",
               value: postText,
               onChange: (e) => setPostText(e.target.value),
-              className: "bg-input border-border resize-none h-16 text-sm",
-              disabled: isBusy
+              className: "bg-input border-border resize-none min-h-[4rem] text-sm",
+              disabled: isBusy || isRecording
             }
           ),
           pendingMedia && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 text-xs text-muted-foreground", children: [
@@ -927,15 +1589,116 @@ function ChannelView({
               }
             )
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+          showEmbedInput && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-1", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                Input,
+                {
+                  "data-ocid": "channel.post.input",
+                  placeholder: "Paste YouTube, X, or TikTok URL...",
+                  value: embedUrl,
+                  onChange: (e) => setEmbedUrl(e.target.value),
+                  className: "flex-1 h-8 text-xs bg-input border-border",
+                  disabled: isBusy
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => {
+                    setEmbedUrl("");
+                    setShowEmbedInput(false);
+                  },
+                  className: "p-1 rounded hover:bg-muted text-muted-foreground",
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsx(X, { className: "h-3.5 w-3.5" })
+                }
+              )
+            ] }),
+            detectedPlatform && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "span",
+              {
+                className: "text-xs font-semibold px-1",
+                style: { color: "oklch(0.82 0.15 72)" },
+                children: [
+                  detectedPlatform === "youtube" && "▶ YouTube detected",
+                  detectedPlatform === "x" && "𝕏 X / Twitter detected",
+                  detectedPlatform === "tiktok" && "TT TikTok detected"
+                ]
+              }
+            )
+          ] }),
+          isRecording ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 py-1", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "relative flex h-2.5 w-2.5", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "span",
+                  {
+                    className: "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                    style: { background: "oklch(0.55 0.22 25)" }
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "span",
+                  {
+                    className: "relative inline-flex rounded-full h-2.5 w-2.5",
+                    style: { background: "oklch(0.6 0.25 25)" }
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                Mic,
+                {
+                  className: "h-4 w-4",
+                  style: { color: "oklch(0.6 0.25 25)" }
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "span",
+                {
+                  className: "text-sm font-mono font-semibold",
+                  style: { color: "oklch(0.6 0.25 25)" },
+                  children: formatRecordingTime(recordingSeconds)
+                }
+              )
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: cancelRecording,
+                className: "px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-muted transition-colors text-muted-foreground",
+                children: "Cancel"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Button,
+              {
+                size: "sm",
+                onClick: sendRecording,
+                disabled: isBusy,
+                style: {
+                  background: "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                  color: "oklch(0.08 0.004 55)"
+                },
+                className: "rounded-xl text-xs px-4",
+                "data-ocid": "channel.post.submit_button",
+                children: isBusy ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "h-3 w-3 animate-spin" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(Send, { className: "h-3 w-3 mr-1.5" }),
+                  "Send"
+                ] })
+              }
+            )
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
               {
                 type: "button",
                 "data-ocid": "channel.post.upload_button",
                 onClick: () => {
-                  var _a;
-                  return (_a = imageRef.current) == null ? void 0 : _a.click();
+                  var _a2;
+                  return (_a2 = imageRef.current) == null ? void 0 : _a2.click();
                 },
                 disabled: isBusy,
                 className: "p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground",
@@ -948,8 +1711,8 @@ function ChannelView({
               {
                 type: "button",
                 onClick: () => {
-                  var _a;
-                  return (_a = videoRef.current) == null ? void 0 : _a.click();
+                  var _a2;
+                  return (_a2 = videoRef.current) == null ? void 0 : _a2.click();
                 },
                 disabled: isBusy,
                 className: "p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground",
@@ -961,14 +1724,25 @@ function ChannelView({
               "button",
               {
                 type: "button",
-                onClick: () => {
-                  var _a;
-                  return (_a = audioRef.current) == null ? void 0 : _a.click();
-                },
+                onClick: startRecording,
                 disabled: isBusy,
                 className: "p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground",
-                title: "Attach audio",
+                title: "Record audio",
                 children: /* @__PURE__ */ jsxRuntimeExports.jsx(Mic, { className: "h-4 w-4" })
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                onClick: () => setShowEmbedInput((v) => !v),
+                disabled: isBusy,
+                className: "p-1.5 rounded-lg hover:bg-muted transition-colors hover:text-foreground",
+                style: {
+                  color: showEmbedInput ? "oklch(0.82 0.15 72)" : void 0
+                },
+                title: "Embed YouTube / X / TikTok",
+                children: /* @__PURE__ */ jsxRuntimeExports.jsx(Link, { className: "h-4 w-4" })
               }
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -979,8 +1753,8 @@ function ChannelView({
                 accept: "image/*",
                 className: "hidden",
                 onChange: (e) => {
-                  var _a;
-                  return setPendingMedia(((_a = e.target.files) == null ? void 0 : _a[0]) ?? null);
+                  var _a2;
+                  return setPendingMedia(((_a2 = e.target.files) == null ? void 0 : _a2[0]) ?? null);
                 }
               }
             ),
@@ -992,21 +1766,8 @@ function ChannelView({
                 accept: "video/*",
                 className: "hidden",
                 onChange: (e) => {
-                  var _a;
-                  return setPendingMedia(((_a = e.target.files) == null ? void 0 : _a[0]) ?? null);
-                }
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "input",
-              {
-                ref: audioRef,
-                type: "file",
-                accept: "audio/*",
-                className: "hidden",
-                onChange: (e) => {
-                  var _a;
-                  return setPendingMedia(((_a = e.target.files) == null ? void 0 : _a[0]) ?? null);
+                  var _a2;
+                  return setPendingMedia(((_a2 = e.target.files) == null ? void 0 : _a2[0]) ?? null);
                 }
               }
             ),
@@ -1017,7 +1778,7 @@ function ChannelView({
                 "data-ocid": "channel.post.submit_button",
                 size: "sm",
                 onClick: handlePost,
-                disabled: isBusy || !postText.trim() && !pendingMedia,
+                disabled: isBusy || !postText.trim() && !pendingMedia && !(embedUrl.trim() && detectedPlatform),
                 style: {
                   background: "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
                   color: "oklch(0.08 0.004 55)"
@@ -1031,6 +1792,66 @@ function ChannelView({
             )
           ] })
         ]
+      }
+    ),
+    pinnedPost && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "div",
+      {
+        "data-ocid": "channel.pinned_post_banner",
+        className: "shrink-0 border-b border-border",
+        style: { background: "oklch(0.13 0.025 65)" },
+        children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              type: "button",
+              className: "w-full flex items-center gap-2 px-4 py-2 pr-10 text-left hover:bg-muted/20 transition-colors",
+              onClick: () => {
+                const el = document.querySelector(
+                  `[data-ocid="channel.post.item.${sortedPosts.indexOf(pinnedPost) + 1}"]`
+                );
+                el == null ? void 0 : el.scrollIntoView({ behavior: "smooth", block: "center" });
+              },
+              "aria-label": "Go to pinned post",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Pin,
+                  {
+                    className: "h-3.5 w-3.5 shrink-0",
+                    style: { color: "oklch(0.82 0.15 72)" }
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    "span",
+                    {
+                      className: "text-[10px] font-semibold uppercase tracking-wider block",
+                      style: { color: "oklch(0.82 0.15 72)" },
+                      children: "Pinned post"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-muted-foreground truncate block", children: pinnedPost.content.mediaUrl ? "📎 Media" : ((_a = pinnedPost.content.text) == null ? void 0 : _a.slice(0, 70)) ?? "" })
+                ] })
+              ]
+            }
+          ),
+          isOwner && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              "data-ocid": "channel.pinned_post.unpin_button",
+              onClick: (e) => {
+                e.stopPropagation();
+                unpinPost(void 0, {
+                  onError: () => ue.error("Failed to unpin post")
+                });
+              },
+              className: "absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-muted/50 transition-colors text-muted-foreground hover:text-foreground",
+              "aria-label": "Unpin post",
+              children: /* @__PURE__ */ jsxRuntimeExports.jsx(X, { className: "h-3.5 w-3.5" })
+            }
+          )
+        ] })
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(ScrollArea, { className: "flex-1 min-h-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-4 flex flex-col gap-4", children: postsLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { "data-ocid": "channel.view.loading_state", children: [1, 2].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-32 rounded-2xl mb-4" }, i)) }) : sortedPosts.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -1068,7 +1889,14 @@ function ChannelView({
           isPostAuthor: post.author.toString() === currentUserId,
           currentUserId,
           channelId,
-          index: idx
+          index: idx,
+          isPinned: pinnedPostId != null && post.id === pinnedPostId,
+          onPin: isOwner ? (postId) => pinPost(postId, {
+            onError: () => ue.error("Failed to pin post")
+          }) : void 0,
+          onUnpin: isOwner ? () => unpinPost(void 0, {
+            onError: () => ue.error("Failed to unpin post")
+          }) : void 0
         },
         post.id.toString()
       )),
@@ -1100,7 +1928,8 @@ function ChannelView({
         channelId,
         initialName: channel.name,
         initialDescription: channel.description,
-        initialAvatarUrl: channel.avatarUrl
+        initialAvatarUrl: channel.avatarUrl,
+        initialCategory: channel.category
       }
     )
   ] });

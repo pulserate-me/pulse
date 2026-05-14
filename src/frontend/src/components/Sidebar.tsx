@@ -2,6 +2,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -25,12 +30,18 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Area, AreaChart, XAxis } from "recharts";
 import type { Conversation, ConversationId, UserProfile } from "../backend";
 import { createActor } from "../backend";
 import {
   useCreateDirectConversation,
   useGetActiveUsersCount,
+  useGetAllChannels,
+  useGetAnalyticsTrend,
+  useGetChannelFollowerHistory,
   useGetGroupAvatars,
+  useGetMyChannelFollowerCounts,
+  useGetMyProfileViewCount,
   useGetTotalChannelsCreated,
   useGetTotalGoldVolume,
   useGetTotalMessagesSent,
@@ -46,6 +57,7 @@ import {
   useSearchUsers,
 } from "../hooks/useQueries";
 import type {
+  AnalyticsSnapshot,
   ChannelId,
   ChannelPost,
   ChannelWithMeta,
@@ -218,7 +230,6 @@ function SectionSearchInput({
           borderColor: value
             ? "oklch(0.76 0.13 72 / 0.5)"
             : "oklch(0.3 0.02 55)",
-          // biome-ignore lint/style/noUnusedTemplateLiteral: intentional
           color: "inherit",
         }}
         onFocus={(e) => {
@@ -476,6 +487,290 @@ function ConversationSections({
 }
 
 // Analytics Dashboard — visible to all users
+// Time range options
+const TIME_RANGES = [
+  { label: "Today", value: "today" },
+  { label: "This Week", value: "week" },
+  { label: "This Month", value: "month" },
+  { label: "All Time", value: "all" },
+] as const;
+
+type TimeRange = (typeof TIME_RANGES)[number]["value"];
+
+function formatXAxisLabel(ts: number, range: TimeRange): string {
+  const d = new Date(ts);
+  if (range === "today") {
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  if (range === "week" || range === "month") {
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+  // all time — show week label
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function buildFallbackPoint(
+  totalUsers: bigint | undefined,
+  messagesSent: bigint | undefined,
+  goldVolume: number | undefined,
+  activeUsers: bigint | undefined,
+  channelsCreated: bigint | undefined,
+  storiesPosted: bigint | undefined,
+): AnalyticsSnapshot[] {
+  return [
+    {
+      timestamp: BigInt(Date.now() * 1_000_000),
+      totalUsers: totalUsers ?? BigInt(0),
+      messagesSent: messagesSent ?? BigInt(0),
+      goldVolume: goldVolume ?? 0,
+      activeUsers: activeUsers ?? BigInt(0),
+      channelsCreated: channelsCreated ?? BigInt(0),
+      storiesPosted: storiesPosted ?? BigInt(0),
+    },
+  ];
+}
+
+const ACCENT_COLOR = "oklch(0.82 0.15 72)";
+
+interface MetricChartProps {
+  label: string;
+  icon: string;
+  dataKey: keyof AnalyticsSnapshot;
+  snapshots: AnalyticsSnapshot[];
+  range: TimeRange;
+  isSinglePoint: boolean;
+  formatter?: (v: number) => string;
+}
+
+interface ChannelFollowerChartProps {
+  channelId: string;
+  channelName: string;
+  currentCount: number;
+  range: TimeRange;
+}
+
+function ChannelFollowerChart({
+  channelId,
+  channelName,
+  currentCount,
+  range,
+}: ChannelFollowerChartProps) {
+  const { data: history } = useGetChannelFollowerHistory(channelId);
+
+  const nowMs = Date.now();
+  const cutoffMs =
+    range === "today"
+      ? nowMs - 86_400_000
+      : range === "week"
+        ? nowMs - 7 * 86_400_000
+        : range === "month"
+          ? nowMs - 30 * 86_400_000
+          : 0;
+
+  const filtered = Array.isArray(history)
+    ? history.filter((p) => Number(p.timestamp) / 1_000_000 >= cutoffMs)
+    : [];
+
+  const chartData = filtered.map((p) => ({
+    time: Number(p.timestamp) / 1_000_000,
+    value: typeof p.count === "bigint" ? Number(p.count) : p.count,
+  }));
+
+  const hasHistory = chartData.length >= 2;
+
+  const chartConfig = {
+    value: { label: "Followers", color: ACCENT_COLOR },
+  };
+
+  return (
+    <div
+      className="rounded-xl p-3"
+      style={{
+        background: "oklch(0.16 0.03 55)",
+        border: "1px solid oklch(0.82 0.15 72 / 0.12)",
+      }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs text-muted-foreground truncate max-w-[70%]">
+          {channelName}
+        </span>
+        <span className="text-xs font-semibold" style={{ color: ACCENT_COLOR }}>
+          {currentCount.toLocaleString()}
+        </span>
+      </div>
+      {hasHistory ? (
+        <ChartContainer config={chartConfig} className="h-12 w-full">
+          <AreaChart
+            data={chartData}
+            margin={{ top: 2, right: 0, left: 0, bottom: 0 }}
+          >
+            <defs>
+              <linearGradient
+                id={`grad-follower-${channelId}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop offset="5%" stopColor={ACCENT_COLOR} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={ACCENT_COLOR} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis
+              dataKey="time"
+              tickFormatter={(v) => formatXAxisLabel(v as number, range)}
+              tick={{ fontSize: 8, fill: "oklch(0.55 0.04 55)" }}
+              axisLine={false}
+              tickLine={false}
+              interval="preserveStartEnd"
+            />
+            <ChartTooltip
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(_, p) =>
+                    p?.[0]
+                      ? formatXAxisLabel(p[0].payload.time as number, range)
+                      : ""
+                  }
+                  formatter={(v) => (v as number).toLocaleString()}
+                />
+              }
+            />
+            <Area
+              type="monotone"
+              dataKey="value"
+              stroke={ACCENT_COLOR}
+              strokeWidth={1.5}
+              fill={`url(#grad-follower-${channelId})`}
+              dot={false}
+              activeDot={{ r: 3, fill: ACCENT_COLOR }}
+            />
+          </AreaChart>
+        </ChartContainer>
+      ) : (
+        <p className="text-[10px] text-muted-foreground/50 italic">
+          Growth chart fills in as data accumulates
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MetricChart({
+  label,
+  icon,
+  dataKey,
+  snapshots,
+  range,
+  isSinglePoint,
+  formatter,
+}: MetricChartProps) {
+  const chartData = snapshots.map((s) => ({
+    time: Number(s.timestamp) / 1_000_000,
+    value:
+      typeof s[dataKey] === "bigint"
+        ? Number(s[dataKey] as bigint)
+        : (s[dataKey] as number),
+  }));
+
+  const latestValue = chartData[chartData.length - 1]?.value ?? 0;
+  const displayValue = formatter
+    ? formatter(latestValue)
+    : latestValue.toLocaleString();
+
+  const chartConfig = {
+    value: {
+      label,
+      color: ACCENT_COLOR,
+    },
+  };
+
+  return (
+    <div
+      data-ocid={`analytics.chart.${label.toLowerCase().replace(/\s+/g, "_")}`}
+      className="rounded-xl p-3 flex flex-col gap-2"
+      style={{
+        background: "oklch(0.16 0.03 55)",
+        border: "1px solid oklch(0.82 0.15 72 / 0.12)",
+      }}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm">{icon}</span>
+          <span className="text-xs text-muted-foreground font-medium">
+            {label}
+          </span>
+        </div>
+        <span
+          className="text-base font-bold font-display"
+          style={{ color: ACCENT_COLOR }}
+        >
+          {displayValue}
+        </span>
+      </div>
+
+      {isSinglePoint ? (
+        <p className="text-[10px] text-muted-foreground/50 italic">
+          Check back later for trend data as the chart fills in over time
+        </p>
+      ) : (
+        <ChartContainer config={chartConfig} className="h-14 w-full">
+          <AreaChart
+            data={chartData}
+            margin={{ top: 2, right: 0, left: 0, bottom: 0 }}
+          >
+            <defs>
+              <linearGradient
+                id={`grad-${dataKey}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop offset="5%" stopColor={ACCENT_COLOR} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={ACCENT_COLOR} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <XAxis
+              dataKey="time"
+              tickFormatter={(v) => formatXAxisLabel(v as number, range)}
+              tick={{ fontSize: 9, fill: "oklch(0.55 0.04 55)" }}
+              axisLine={false}
+              tickLine={false}
+              interval="preserveStartEnd"
+            />
+            <ChartTooltip
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(_, p) =>
+                    p?.[0]
+                      ? formatXAxisLabel(p[0].payload.time as number, range)
+                      : ""
+                  }
+                  formatter={(v) =>
+                    formatter
+                      ? formatter(v as number)
+                      : (v as number).toLocaleString()
+                  }
+                />
+              }
+            />
+            <Area
+              type="monotone"
+              dataKey="value"
+              stroke={ACCENT_COLOR}
+              strokeWidth={1.5}
+              fill={`url(#grad-${dataKey})`}
+              dot={false}
+              activeDot={{ r: 3, fill: ACCENT_COLOR }}
+            />
+          </AreaChart>
+        </ChartContainer>
+      )}
+    </div>
+  );
+}
+
 function AnalyticsDashboard({
   onClose,
   currentProfile,
@@ -484,63 +779,102 @@ function AnalyticsDashboard({
   currentProfile: UserProfile | null;
 }) {
   const isAuthenticated = !!currentProfile;
+  const [range, setRange] = useState<TimeRange>("week");
 
-  // Platform stats
+  // Platform trend data
+  const { data: trendData } = useGetAnalyticsTrend(range);
+
+  // Fallback current-value queries for single-point
   const { data: totalUsers } = useGetTotalUsersCount();
   const { data: messagesSent } = useGetTotalMessagesSent();
   const { data: goldVolume } = useGetTotalGoldVolume();
   const { data: activeUsers } = useGetActiveUsersCount();
   const { data: channelsCreated } = useGetTotalChannelsCreated();
-  const { data: storiesPosts } = useGetTotalStoriesPosts();
+  const { data: storiesPosted } = useGetTotalStoriesPosts();
 
-  // Personal stats (authenticated only)
+  // Personal stats
   const { data: userMessages } = useGetUserMessageCount();
   const { data: userStories } = useGetUserStoriesPosted();
   const { data: userChannels } = useGetUserChannelsCreated();
   const { data: userGoldBalance } = useGetUserGoldBalance();
+  const { data: profileViews } = useGetMyProfileViewCount();
+  const { data: channelFollowerCounts } = useGetMyChannelFollowerCounts();
+  const { data: allChannels } = useGetAllChannels(isAuthenticated);
 
-  const platformMetrics = [
+  const myChannelMap = useMemo(() => {
+    if (!allChannels || !currentProfile) return new Map<string, string>();
+    const m = new Map<string, string>();
+    for (const { channel, ownerProfile } of allChannels) {
+      if (ownerProfile.username === currentProfile.username) {
+        m.set(channel.name, channel.id.toString());
+      }
+    }
+    return m;
+  }, [allChannels, currentProfile]);
+
+  const snapshots: AnalyticsSnapshot[] =
+    trendData && trendData.length > 0
+      ? trendData
+      : buildFallbackPoint(
+          totalUsers,
+          messagesSent,
+          goldVolume,
+          activeUsers,
+          channelsCreated,
+          storiesPosted,
+        );
+
+  const isSinglePoint = snapshots.length <= 1;
+
+  const platformCharts: MetricChartProps[] = [
     {
       label: "Total Users",
-      value:
-        totalUsers !== undefined ? Number(totalUsers).toLocaleString() : "—",
       icon: "👥",
+      dataKey: "totalUsers",
+      snapshots,
+      range,
+      isSinglePoint,
     },
     {
       label: "Messages Sent",
-      value:
-        messagesSent !== undefined
-          ? Number(messagesSent).toLocaleString()
-          : "—",
       icon: "💬",
+      dataKey: "messagesSent",
+      snapshots,
+      range,
+      isSinglePoint,
     },
     {
-      label: "Gold Volume",
-      value:
-        goldVolume !== undefined ? `✦ ${Number(goldVolume).toFixed(2)}` : "—",
+      label: "Pulse Volume",
       icon: "✦",
+      dataKey: "goldVolume",
+      snapshots,
+      range,
+      isSinglePoint,
+      formatter: (v) => `✦ ${v.toFixed(4)}`,
     },
     {
-      label: "Active Users (7d)",
-      value:
-        activeUsers !== undefined ? Number(activeUsers).toLocaleString() : "—",
+      label: "Active Users",
       icon: "🟢",
+      dataKey: "activeUsers",
+      snapshots,
+      range,
+      isSinglePoint,
     },
     {
-      label: "Channels Created",
-      value:
-        channelsCreated !== undefined
-          ? Number(channelsCreated).toLocaleString()
-          : "—",
+      label: "Channels",
       icon: "📻",
+      dataKey: "channelsCreated",
+      snapshots,
+      range,
+      isSinglePoint,
     },
     {
       label: "Stories Posted",
-      value:
-        storiesPosts !== undefined
-          ? Number(storiesPosts).toLocaleString()
-          : "—",
       icon: "📖",
+      dataKey: "storiesPosted",
+      snapshots,
+      range,
+      isSinglePoint,
     },
   ];
 
@@ -568,10 +902,18 @@ function AnalyticsDashboard({
       icon: "📡",
     },
     {
-      label: "Your Gold",
+      label: "Your Pulse",
       value:
-        userGoldBalance !== undefined ? `✦ ${userGoldBalance.toFixed(2)}` : "—",
+        userGoldBalance !== undefined ? `✦ ${userGoldBalance.toFixed(4)}` : "—",
       icon: "✦",
+    },
+    {
+      label: "Profile Views",
+      value:
+        profileViews !== undefined
+          ? Number(profileViews).toLocaleString()
+          : "—",
+      icon: "👁️",
     },
   ];
 
@@ -583,13 +925,10 @@ function AnalyticsDashboard({
         style={{ background: "oklch(0.13 0.02 55)" }}
       >
         <div className="flex items-center gap-2">
-          <BarChart2
-            className="h-4 w-4"
-            style={{ color: "oklch(0.82 0.15 72)" }}
-          />
+          <BarChart2 className="h-4 w-4" style={{ color: ACCENT_COLOR }} />
           <span
             className="font-semibold text-sm"
-            style={{ color: "oklch(0.82 0.15 72)" }}
+            style={{ color: ACCENT_COLOR }}
           >
             Analytics
           </span>
@@ -606,9 +945,41 @@ function AnalyticsDashboard({
         </Button>
       </div>
 
-      {/* Scrollable metrics area */}
+      {/* Time range filter */}
+      <div
+        className="flex items-center gap-1 px-4 py-2.5 border-b border-border shrink-0"
+        style={{ background: "oklch(0.13 0.02 55)" }}
+      >
+        {TIME_RANGES.map((r) => (
+          <button
+            type="button"
+            key={r.value}
+            data-ocid={`analytics.range.${r.value}`}
+            onClick={() => setRange(r.value)}
+            className="flex-1 text-center text-[10px] font-semibold rounded-lg py-1.5 transition-all"
+            style={{
+              background:
+                range === r.value
+                  ? "oklch(0.82 0.15 72 / 0.15)"
+                  : "transparent",
+              color:
+                range === r.value
+                  ? "oklch(0.82 0.15 72)"
+                  : "oklch(0.55 0.04 55)",
+              border:
+                range === r.value
+                  ? "1px solid oklch(0.82 0.15 72 / 0.3)"
+                  : "1px solid transparent",
+            }}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto scrollbar-thin p-4 flex flex-col gap-5">
-        {/* Platform Stats section */}
+        {/* Platform Stats */}
         <div>
           <p
             className="text-[10px] uppercase tracking-widest font-semibold mb-2.5"
@@ -616,28 +987,9 @@ function AnalyticsDashboard({
           >
             Platform Stats
           </p>
-          <div className="grid grid-cols-2 gap-2.5">
-            {platformMetrics.map((metric) => (
-              <div
-                key={metric.label}
-                data-ocid={`analytics.platform.${metric.label.toLowerCase().replace(/\s+/g, "_")}`}
-                className="flex flex-col gap-1.5 rounded-xl p-3"
-                style={{
-                  background: "oklch(0.16 0.03 55)",
-                  border: "1px solid oklch(0.82 0.15 72 / 0.12)",
-                }}
-              >
-                <span className="text-base leading-none">{metric.icon}</span>
-                <span
-                  className="text-lg font-bold font-display leading-tight"
-                  style={{ color: "oklch(0.82 0.15 72)" }}
-                >
-                  {metric.value}
-                </span>
-                <span className="text-xs text-muted-foreground leading-tight">
-                  {metric.label}
-                </span>
-              </div>
+          <div className="flex flex-col gap-2">
+            {platformCharts.map((cfg) => (
+              <MetricChart key={cfg.label} {...cfg} />
             ))}
           </div>
         </div>
@@ -648,7 +1000,7 @@ function AnalyticsDashboard({
           style={{ background: "oklch(0.82 0.15 72 / 0.1)" }}
         />
 
-        {/* Your Activity section */}
+        {/* Your Activity */}
         <div>
           <p
             className="text-[10px] uppercase tracking-widest font-semibold mb-2.5"
@@ -667,29 +1019,79 @@ function AnalyticsDashboard({
               Log in to see your stats
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-2.5">
-              {personalMetrics.map((metric) => (
-                <div
-                  key={metric.label}
-                  data-ocid={`analytics.personal.${metric.label.toLowerCase().replace(/\s+/g, "_")}`}
-                  className="flex flex-col gap-1.5 rounded-xl p-3"
-                  style={{
-                    background: "oklch(0.16 0.03 55)",
-                    border: "1px solid oklch(0.82 0.15 72 / 0.12)",
-                  }}
-                >
-                  <span className="text-base leading-none">{metric.icon}</span>
-                  <span
-                    className="text-lg font-bold font-display leading-tight"
-                    style={{ color: "oklch(0.82 0.15 72)" }}
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                {personalMetrics.map((metric) => (
+                  <div
+                    key={metric.label}
+                    data-ocid={`analytics.personal.${metric.label.toLowerCase().replace(/\s+/g, "_")}`}
+                    className="flex flex-col gap-1.5 rounded-xl p-3"
+                    style={{
+                      background: "oklch(0.16 0.03 55)",
+                      border: "1px solid oklch(0.82 0.15 72 / 0.12)",
+                    }}
                   >
-                    {metric.value}
-                  </span>
-                  <span className="text-xs text-muted-foreground leading-tight">
-                    {metric.label}
-                  </span>
-                </div>
-              ))}
+                    <span className="text-base leading-none">
+                      {metric.icon}
+                    </span>
+                    <span
+                      className="text-base font-bold font-display leading-tight"
+                      style={{ color: ACCENT_COLOR }}
+                    >
+                      {metric.value}
+                    </span>
+                    <span className="text-xs text-muted-foreground leading-tight">
+                      {metric.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Channel follower growth */}
+              {Array.isArray(channelFollowerCounts) &&
+                channelFollowerCounts.length > 0 && (
+                  <div className="flex flex-col gap-2 mt-1">
+                    <p
+                      className="text-[10px] uppercase tracking-widest font-semibold"
+                      style={{ color: "oklch(0.82 0.15 72 / 0.7)" }}
+                    >
+                      📡 Channel Follower Growth
+                    </p>
+                    {(channelFollowerCounts as Array<[string, number]>).map(
+                      ([name, count]) => {
+                        const channelId = myChannelMap.get(name) ?? null;
+                        return channelId ? (
+                          <ChannelFollowerChart
+                            key={name}
+                            channelId={channelId}
+                            channelName={name}
+                            currentCount={count}
+                            range={range}
+                          />
+                        ) : (
+                          <div
+                            key={name}
+                            className="rounded-xl p-3 flex items-center justify-between"
+                            style={{
+                              background: "oklch(0.16 0.03 55)",
+                              border: "1px solid oklch(0.82 0.15 72 / 0.12)",
+                            }}
+                          >
+                            <span className="text-xs text-muted-foreground truncate max-w-[70%]">
+                              {name}
+                            </span>
+                            <span
+                              className="text-xs font-semibold"
+                              style={{ color: ACCENT_COLOR }}
+                            >
+                              {count.toLocaleString()}
+                            </span>
+                          </div>
+                        );
+                      },
+                    )}
+                  </div>
+                )}
             </div>
           )}
         </div>
@@ -878,6 +1280,20 @@ export default function Sidebar({
     string | null
   >(null);
   const [channelCreatorOpen, setChannelCreatorOpen] = useState(false);
+  // Lazy-load tabs: only fetch data when a tab has been visited for the first time.
+  // Chats is the default tab, so it starts as already visited.
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(
+    () => new Set(["chats"]),
+  );
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setVisitedTabs((prev) => {
+      if (prev.has(tab)) return prev;
+      const next = new Set(prev);
+      next.add(tab);
+      return next;
+    });
+  };
   const { data: conversations, isLoading } = useListUserConversations();
   const { data: groupAvatarsData } = useGetGroupAvatars();
   const { mutateAsync: searchUser } = useSearchUserByUsername();
@@ -1175,7 +1591,7 @@ export default function Sidebar({
         )}
 
         {/* Chats / Stories / Channels Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={handleTabChange}>
           <TabsList className="w-full bg-muted/50" data-ocid="sidebar.tab">
             <TabsTrigger
               value="chats"
@@ -1414,6 +1830,7 @@ export default function Sidebar({
         <StatusView
           currentUserId={currentUserId}
           currentProfile={currentProfile}
+          enabled={visitedTabs.has("status")}
           onStartChat={onStartChat}
           onSelectChannel={(id) => {
             setActiveTab("channels");
@@ -1423,13 +1840,18 @@ export default function Sidebar({
       ) : !universalSearchActive && activeTab === "channels" ? (
         <ChannelsTab
           currentUserId={currentUserId}
+          enabled={visitedTabs.has("channels")}
           onSelectChannel={onSelectChannel}
           onAvatarClick={handleChannelAvatarClick}
         />
       ) : !universalSearchActive && activeTab === "wallet" ? (
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-thin"
+          style={{ WebkitOverflowScrolling: "touch" }}
+        >
           <WalletTab
             currentUsername={currentProfile?.username ?? ""}
+            enabled={visitedTabs.has("wallet")}
             onOpenChat={handleOpenChatByUsername}
           />
         </div>

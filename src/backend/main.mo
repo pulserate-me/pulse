@@ -17,6 +17,7 @@ import MixinAuthorization "mo:caffeineai-authorization/MixinAuthorization";
 import AccessControl "mo:caffeineai-authorization/access-control";
 import MixinObjectStorage "mo:caffeineai-object-storage/Mixin";
 import _Storage "mo:caffeineai-object-storage/Storage";
+import OnlineUsersMixin "mixins/online-users-api";
 
 
 
@@ -243,6 +244,7 @@ actor {
 
   let conversations = Map.empty<ConversationId, Conversation>();
   let users = Map.empty<UserId, UserProfile>();
+  include OnlineUsersMixin(users);
   let statuses = Map.empty<StatusId, Status>();
   let statusLikes = Map.empty<StatusId, Set.Set<UserId>>();
   let statusComments = Map.empty<CommentId, StatusComment>();
@@ -262,7 +264,9 @@ actor {
   let goldBalances = Map.empty<UserId, Nat>();
   let goldTransactions = Map.empty<UserId, List.List<GoldTransaction>>();
   var adminTotalClaimed : Nat = 0;
-  let goldMaxClaim : Nat = 999_999_900;
+  // goldBalances stores amounts at ×10000 scale: 1 unit = 0.0001 Pulse
+  // 9,999,999 Pulse × 10000 = 99_999_990_000 units
+  let goldMaxClaim : Nat = 99_999_990_000;
   let adminUsername : Text = "pulse";
 
   // Notifications store
@@ -282,6 +286,28 @@ actor {
 
   // Block System State
   let blockedUsers = Map.empty<UserId, Set.Set<UserId>>();
+
+  // ── Analytics State ─────────────────────────────────────────────────────
+  // Profile view tracking: profileUserId → List of (viewerPrincipal, timestamp)
+  let profileViews = Map.empty<UserId, List.List<(Principal, Int)>>();
+
+  // Channel follower growth history: channelId → List of FollowerSnapshot
+  public type FollowerSnapshot = { timestamp : Int; count : Nat };
+  let channelFollowerHistory = Map.empty<ChannelId, List.List<FollowerSnapshot>>();
+
+  // Platform analytics snapshots (hourly)
+  public type AnalyticsSnapshot = {
+    timestamp : Int;
+    totalUsers : Nat;
+    messagesSent : Nat;
+    goldVolume : Float;
+    activeUsers : Nat;
+    channelsCreated : Nat;
+    storiesPosted : Nat;
+  };
+  let analyticsSnapshots = List.empty<AnalyticsSnapshot>();
+  // Tracks when the last snapshot was recorded (0 = never)
+  var lastSnapshotTimestamp : Int = 0;
 
   // Internal functions
   func addNotification(userId : UserId, kind : NotificationKind) {
@@ -444,7 +470,13 @@ actor {
     if (profile.username == adminUsername) {
       accessControlState.userRoles.add(caller, #admin);
     };
-    users.add(caller, profile);
+    // If profile includes an avatarUrl, stamp lastSeen so the user appears
+    // immediately at the top of the Online Now section.
+    let stored = switch (profile.avatarUrl) {
+      case (?_) { { profile with lastSeen = Time.now() } };
+      case null { profile };
+    };
+    users.add(caller, stored);
   };
 
   public query ({ caller }) func getUserProfile(userId : UserId) : async ?UserProfile {
@@ -501,12 +533,13 @@ actor {
       Runtime.trap("Unauthorized: Only users can update avatar");
     };
     let currentUser = getUserProfileOrTrap(caller);
+    let now = Time.now();
     users.add(
       caller,
       {
         username = currentUser.username;
         displayName = currentUser.displayName;
-        lastSeen = currentUser.lastSeen;
+        lastSeen = now;
         bio = currentUser.bio;
         avatarUrl = ?avatarUrl;
       },
@@ -1446,6 +1479,20 @@ actor {
       };
       case (?s) { s.add(caller) };
     };
+    // Record follower snapshot
+    let newCount = switch (channelFollowers.get(channelId)) {
+      case (null) { 0 };
+      case (?s) { s.size() };
+    };
+    let snap : FollowerSnapshot = { timestamp = Time.now(); count = newCount };
+    switch (channelFollowerHistory.get(channelId)) {
+      case (null) {
+        let lst = List.empty<FollowerSnapshot>();
+        lst.add(snap);
+        channelFollowerHistory.add(channelId, lst);
+      };
+      case (?lst) { lst.add(snap) };
+    };
     // Notify channel owner
     switch (channels.get(channelId)) {
       case (?channel) {
@@ -1465,6 +1512,20 @@ actor {
     switch (channelFollowers.get(channelId)) {
       case (null) { () };
       case (?s) { s.remove(caller) };
+    };
+    // Record follower snapshot after removal
+    let newCount = switch (channelFollowers.get(channelId)) {
+      case (null) { 0 };
+      case (?s) { s.size() };
+    };
+    let snap : FollowerSnapshot = { timestamp = Time.now(); count = newCount };
+    switch (channelFollowerHistory.get(channelId)) {
+      case (null) {
+        let lst = List.empty<FollowerSnapshot>();
+        lst.add(snap);
+        channelFollowerHistory.add(channelId, lst);
+      };
+      case (?lst) { lst.add(snap) };
     };
   };
 
@@ -1948,12 +2009,12 @@ actor {
     #ok;
   };
 
-  // Gift Gold to a channel post author (minimum 0.01 Gold = 1 unit)
+  // Gift Gold to a channel post author (minimum 0.01 Gold = 100 units at ×10000 scale)
   public shared ({ caller }) func giftGoldToPost(postId : ChannelPostId, amount : Nat) : async { #ok; #err : Text } {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       return #err("Unauthorized");
     };
-    if (amount < 1) { return #err("Minimum gift is 0.01 Gold") };
+    if (amount < 100) { return #err("Minimum gift is 0.01 Pulse") };
     let post = switch (channelPosts.get(postId)) {
       case (null) { return #err("Post not found") };
       case (?p) { p };
@@ -1967,12 +2028,12 @@ actor {
     doGoldTransfer(caller, post.author, amount);
   };
 
-  // Gift Gold to a story author (minimum 0.01 Gold = 1 unit)
+  // Gift Gold to a story author (minimum 0.01 Gold = 100 units at ×10000 scale)
   public shared ({ caller }) func giftGoldToStory(statusId : StatusId, amount : Nat) : async { #ok; #err : Text } {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       return #err("Unauthorized");
     };
-    if (amount < 1) { return #err("Minimum gift is 0.01 Gold") };
+    if (amount < 100) { return #err("Minimum gift is 0.01 Pulse") };
     let story = switch (statuses.get(statusId)) {
       case (null) { return #err("Story not found") };
       case (?s) { s };
@@ -2020,7 +2081,7 @@ actor {
             id;
           };
         };
-        let whole = amount / 100; let frac = amount % 100; let fracText = if (frac < 10) { "0" # frac.toText() } else { frac.toText() }; let goldAmtText = whole.toText() # "." # fracText; let msgText = "[Gold Request] @" # callerProfile.username # " wants to BUY " # goldAmtText # " Gold";
+        let whole = amount / 10000; let fracRaw = amount % 10000; let fracText = if (fracRaw < 10) { "000" # fracRaw.toText() } else if (fracRaw < 100) { "00" # fracRaw.toText() } else if (fracRaw < 1000) { "0" # fracRaw.toText() } else { fracRaw.toText() }; let goldAmtText = whole.toText() # "." # fracText; let msgText = "[Gold Request] @" # callerProfile.username # " wants to BUY " # goldAmtText # " Gold";
         let msg = {
           id = nextMessageId;
           sender = caller;
@@ -2073,7 +2134,7 @@ actor {
             id;
           };
         };
-        let whole2 = amount / 100; let frac2 = amount % 100; let fracText2 = if (frac2 < 10) { "0" # frac2.toText() } else { frac2.toText() }; let goldAmtText2 = whole2.toText() # "." # fracText2; let msgText = "[Gold Request] @" # callerProfile.username # " wants to SELL " # goldAmtText2 # " Gold";
+        let whole2 = amount / 10000; let fracRaw2 = amount % 10000; let fracText2 = if (fracRaw2 < 10) { "000" # fracRaw2.toText() } else if (fracRaw2 < 100) { "00" # fracRaw2.toText() } else if (fracRaw2 < 1000) { "0" # fracRaw2.toText() } else { fracRaw2.toText() }; let goldAmtText2 = whole2.toText() # "." # fracText2; let msgText = "[Gold Request] @" # callerProfile.username # " wants to SELL " # goldAmtText2 # " Gold";
         let msg = {
           id = nextMessageId;
           sender = caller;
@@ -2229,7 +2290,7 @@ actor {
         total += bal;
       };
     };
-    total.toFloat() / 100.0;
+    total.toFloat() / 10000.0;
   };
 
   public query func getActiveUsersCount() : async Nat {
@@ -2250,6 +2311,154 @@ actor {
 
   public query func getTotalStoriesPosted() : async Nat {
     statuses.size();
+  };
+
+  // ── Profile View Tracking ─────────────────────────────────────────────────
+
+  /// Record that the caller viewed profileUserId's profile. Self-views are skipped.
+  public shared ({ caller }) func recordProfileView(profileUserId : Text) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    // Resolve target user by username
+    let targetEntry = findUserByUsername(profileUserId);
+    let targetId = switch (targetEntry) {
+      case (null) { return }; // unknown user — silently skip
+      case (?(id, _)) { id };
+    };
+    // Skip self-views
+    if (targetId == caller) { return };
+    let now = Time.now();
+    switch (profileViews.get(targetId)) {
+      case (null) {
+        let lst = List.empty<(Principal, Int)>();
+        lst.add((caller, now));
+        profileViews.add(targetId, lst);
+      };
+      case (?lst) { lst.add((caller, now)) };
+    };
+  };
+
+  /// Returns the total number of profile views for a given userId (by username).
+  public query func getProfileViewCount(userId : Text) : async Nat {
+    let targetEntry = findUserByUsername(userId);
+    switch (targetEntry) {
+      case (null) { 0 };
+      case (?(id, _)) {
+        switch (profileViews.get(id)) {
+          case (null) { 0 };
+          case (?lst) { lst.size() };
+        };
+      };
+    };
+  };
+
+  /// Returns the number of times the caller's profile has been viewed.
+  public query ({ caller }) func getMyProfileViewCount() : async Nat {
+    switch (profileViews.get(caller)) {
+      case (null) { 0 };
+      case (?lst) { lst.size() };
+    };
+  };
+
+  // ── Analytics Snapshots ───────────────────────────────────────────────────
+
+  /// Internal: compute and record a new snapshot if more than 1 hour since last one.
+  func maybeRecordAnalyticsSnapshot() {
+    let oneHourNs : Int = 3_600_000_000_000;
+    let now = Time.now();
+    if (now - lastSnapshotTimestamp < oneHourNs) { return };
+    // Compute current platform metrics
+    var totalMessages : Nat = 0;
+    for (conv in conversations.values()) {
+      totalMessages += conv.messages.size();
+    };
+    var goldVol : Nat = 0;
+    for ((_, txList) in goldTransactions.entries()) {
+      for (tx in txList.toArray().vals()) {
+        switch (tx.txType) {
+          case (#sent) { goldVol += tx.amount };
+          case (_) {};
+        };
+      };
+    };
+    if (goldVol == 0) {
+      for ((_, bal) in goldBalances.entries()) { goldVol += bal };
+    };
+    let sevenDaysNs : Int = 7 * 24 * 60 * 60 * 1_000_000_000;
+    let cutoff : Int = now - sevenDaysNs;
+    var activeUsers : Nat = 0;
+    for ((_, profile) in users.entries()) {
+      if (profile.lastSeen > cutoff) { activeUsers += 1 };
+    };
+    let snap : AnalyticsSnapshot = {
+      timestamp = now;
+      totalUsers = users.size();
+      messagesSent = totalMessages;
+      goldVolume = goldVol.toFloat() / 10000.0;
+      activeUsers;
+      channelsCreated = channels.size();
+      storiesPosted = statuses.size();
+    };
+    analyticsSnapshots.add(snap);
+    lastSnapshotTimestamp := now;
+  };
+
+  /// Returns analytics snapshots filtered to the given range.
+  /// Also triggers a new snapshot if more than 1 hour has passed since the last one.
+  /// range: "today" | "week" | "month" | "alltime"
+  public shared ({ caller }) func getAnalyticsTrend(range : Text) : async [AnalyticsSnapshot] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    maybeRecordAnalyticsSnapshot();
+    let now = Time.now();
+    let cutoff : Int = switch (range) {
+      case ("today") { now - 86_400_000_000_000 };
+      case ("week")  { now - 7 * 86_400_000_000_000 };
+      case ("month") { now - 30 * 86_400_000_000_000 };
+      case (_)       { 0 }; // alltime
+    };
+    analyticsSnapshots.toArray().filter(func(s : AnalyticsSnapshot) : Bool {
+      s.timestamp >= cutoff
+    });
+  };
+
+  // ── Channel Follower History ──────────────────────────────────────────────
+
+  /// Returns (channelId, currentFollowerCount) for all channels owned by the caller.
+  public query ({ caller }) func getMyChannelFollowerCounts() : async [(Text, Nat)] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    channels.toArray()
+      .filter(func((_, ch) : (ChannelId, Channel)) : Bool { ch.owner == caller })
+      .map<(ChannelId, Channel), (Text, Nat)>(func((chId, ch)) {
+        let count = switch (channelFollowers.get(chId)) {
+          case (null) { 0 };
+          case (?s) { s.size() };
+        };
+        (ch.name, count);
+      });
+  };
+
+  /// Returns follower count snapshots for the given channel.
+  /// Only the channel owner may call this.
+  public query ({ caller }) func getChannelFollowerHistory(channelId : ChannelId) : async [FollowerSnapshot] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized");
+    };
+    let ch = switch (channels.get(channelId)) {
+      case (null) { Runtime.trap("Channel not found") };
+      case (?c) { c };
+    };
+    if (ch.owner != caller) {
+      Runtime.trap("Only the channel owner can view follower history");
+    };
+    switch (channelFollowerHistory.get(channelId)) {
+      case (null) { [] };
+      case (?lst) { lst.toArray() };
+    };
   };
 
   // ============================================================
@@ -2438,6 +2647,10 @@ actor {
 
   // Typing expires after 5 seconds (in nanoseconds)
   let typingExpiryNs : Int = 5_000_000_000;
+  // ── Charity Pool State ───────────────────────────────────────────────────
+  var charityPool : Nat = 0;
+  let charityLastClaim = Map.empty<UserId, Int>();
+
 
   // Set or clear the caller's typing status in a conversation.
   public shared ({ caller }) func setTypingStatus(convId : ConversationId, isTyping : Bool) : async () {
@@ -2475,6 +2688,139 @@ actor {
         }).filter(func(name : Text) : Bool { name != "" }).toArray();
       };
     };
+  };
+
+  // ── Charity Endpoints ────────────────────────────────────────────────────
+
+  /// Donate Pulse to the charity pool. Minimum 100 units (0.01 Pulse at ×10000 scale).
+  /// 5% platform fee is deducted from the donated amount and distributed
+  /// proportionally to all Pulse holders. The remaining 95% enters the pool.
+  public shared ({ caller }) func donateToPulseCharity(amount : Nat) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+    if (amount < 100) { return #err("Minimum donation is 0.01 Pulse") };
+    let callerBalance = switch (goldBalances.get(caller)) {
+      case (null) { 0 };
+      case (?b) { b };
+    };
+    if (callerBalance < amount) { return #err("Insufficient Pulse balance") };
+    // Deduct full amount from donor
+    goldBalances.add(caller, callerBalance - amount);
+    let now = Time.now();
+    // Calculate 5% fee and net pool contribution
+    let feeAmount : Nat = amount * 5 / 100;
+    let poolContribution : Nat = if (amount >= feeAmount) { amount - feeAmount } else { amount };
+    // Record donor's sent transaction
+    let sentTxId = nextGoldTxId;
+    nextGoldTxId += 1;
+    recordGoldTx(caller, { id = sentTxId; txType = #sent; amount; counterpartyUsername = ?"Charity Pool"; timestamp = now });
+    // Add net amount to charity pool
+    charityPool += poolContribution;
+    // Distribute fee proportionally to all current Pulse holders
+    if (feeAmount > 0) {
+      let allHolders = goldBalances.toArray();
+      let totalSupply = allHolders.foldLeft(0 : Nat, func(acc, (_, bal)) { acc + bal });
+      if (totalSupply > 0) {
+        for ((holderId, holderBal) in allHolders.vals()) {
+          if (holderBal > 0) {
+            let share = feeAmount * holderBal / totalSupply;
+            if (share > 0) {
+              let currentBal = switch (goldBalances.get(holderId)) {
+                case (null) { 0 };
+                case (?b) { b };
+              };
+              goldBalances.add(holderId, currentBal + share);
+              let feeTxId = nextGoldTxId;
+              nextGoldTxId += 1;
+              recordGoldTx(holderId, { id = feeTxId; txType = #received; amount = share; counterpartyUsername = ?"platform fee"; timestamp = now });
+            };
+          };
+        };
+      };
+    };
+    #ok;
+  };
+
+  /// Claim 0.01 Pulse (100 units at ×10000 scale) from the charity pool once per 24 hours.
+  /// A 5% platform fee is applied: pool pays 100 units, fee (5 units) is
+  /// distributed proportionally to all Pulse holders, claimer receives 95 units (0.0095 Pulse).
+  public shared ({ caller }) func claimDailyCharityPulse() : async { #ok : Nat; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+    // claimAmount = 100 raw units = 0.01 Pulse (1 Pulse = 10000 raw units)
+    let claimAmount : Nat = 100;
+    if (charityPool < claimAmount) { return #err("Charity pool is empty") };
+    let oneDayNs : Int = 86_400_000_000_000;
+    let now = Time.now();
+    switch (charityLastClaim.get(caller)) {
+      case (?lastClaim) {
+        if (now - lastClaim < oneDayNs) {
+          return #err("Already claimed today. Come back in 24 hours.");
+        };
+      };
+      case (null) {};
+    };
+    // fee = 5% of 100 = 5 units (0.0005 Pulse)
+    // net  = 100 - 5 = 95 units (0.0095 Pulse)
+    let feeAmount : Nat = claimAmount * 5 / 100; // = 5
+    let netAmount : Nat = claimAmount - feeAmount; // = 95
+    // Deduct the full claim amount from the pool
+    charityPool -= claimAmount;
+    // STEP 1: Snapshot all balances BEFORE modifying anything
+    let holderSnapshot = goldBalances.toArray();
+    let totalSupply = holderSnapshot.foldLeft(0 : Nat, func(acc, (_, bal)) { acc + bal });
+    // STEP 2: Distribute fee proportionally to all current holders using the snapshot
+    if (feeAmount > 0 and totalSupply > 0) {
+      for ((holderId, holderBal) in holderSnapshot.vals()) {
+        if (holderBal > 0) {
+          let share = feeAmount * holderBal / totalSupply;
+          if (share > 0) {
+            let currentBal = switch (goldBalances.get(holderId)) {
+              case (null) { 0 };
+              case (?b) { b };
+            };
+            goldBalances.add(holderId, currentBal + share);
+            let feeTxId = nextGoldTxId;
+            nextGoldTxId += 1;
+            recordGoldTx(holderId, { id = feeTxId; txType = #received; amount = share; counterpartyUsername = ?"platform fee"; timestamp = now });
+          };
+        };
+      };
+    };
+    // STEP 3: Credit the claimer with netAmount AFTER fee distribution
+    let callerBalance = switch (goldBalances.get(caller)) {
+      case (null) { 0 };
+      case (?b) { b };
+    };
+    goldBalances.add(caller, callerBalance + netAmount);
+    charityLastClaim.add(caller, now);
+    // Record one 'Received' entry showing 0.0095 Pulse (95 units)
+    let txId = nextGoldTxId;
+    nextGoldTxId += 1;
+    recordGoldTx(caller, { id = txId; txType = #received; amount = netAmount; counterpartyUsername = ?"Daily Charity Claim"; timestamp = now });
+    #ok(netAmount);
+  };
+
+  /// Returns the current charity pool balance in raw units.
+  public query func getCharityPoolBalance() : async Nat {
+    charityPool;
+  };
+
+  /// Returns the caller's last charity claim timestamp (null if never claimed).
+  public shared query ({ caller }) func getCharityLastClaim() : async ?Int {
+    charityLastClaim.get(caller);
+  };
+
+  /// Returns a user's basic profile by username (for Online Now avatars, etc.)
+  public query func getUserByUsername(username : Text) : async ?{ id : Principal; username : Text; displayName : Text; avatarUrl : ?Text } {
+    for ((principal, user) in users.entries()) {
+      if (user.username == username) {
+        return ?{ id = principal; username = user.username; displayName = user.displayName; avatarUrl = user.avatarUrl };
+      };
+    };
+    return null;
   };
 
   // ── Pinned Messages / Pinned Channel Posts ────────────────────────────────

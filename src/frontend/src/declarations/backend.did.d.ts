@@ -10,6 +10,15 @@ import type { ActorMethod } from '@icp-sdk/core/agent';
 import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
+export interface AnalyticsSnapshot {
+  'activeUsers' : bigint,
+  'channelsCreated' : bigint,
+  'messagesSent' : bigint,
+  'storiesPosted' : bigint,
+  'timestamp' : bigint,
+  'totalUsers' : bigint,
+  'goldVolume' : number,
+}
 export interface AppNotification {
   'id' : NotificationId,
   'kind' : NotificationKind,
@@ -76,6 +85,7 @@ export interface DealerInfo {
   'balance' : bigint,
   'avatarUrl' : [] | [string],
 }
+export interface FollowerSnapshot { 'count' : bigint, 'timestamp' : bigint }
 export interface GoldTransaction {
   'id' : GoldTxId,
   'timestamp' : Timestamp,
@@ -138,6 +148,13 @@ export type NotificationKind = {
   { 'storyCommented' : { 'byUsername' : string, 'statusId' : bigint } } |
   { 'storyLiked' : { 'byUsername' : string, 'statusId' : bigint } } |
   { 'channelFollowed' : { 'channelId' : bigint, 'byUsername' : string } };
+export interface OnlineUser {
+  'username' : string,
+  'displayName' : string,
+  'userId' : UserId,
+  'avatarUrl' : [] | [string],
+  'lastSeen' : Timestamp,
+}
 export interface ReplyToInfo {
   'messageId' : MessageId,
   'preview' : string,
@@ -220,6 +237,16 @@ export interface _SERVICE {
   'adminClaimGold' : ActorMethod<[bigint], undefined>,
   'assignCallerUserRole' : ActorMethod<[Principal, UserRole], undefined>,
   'blockUser' : ActorMethod<[UserId], undefined>,
+  /**
+   * / Claim 0.01 Pulse (100 units at ×10000 scale) from the charity pool once per 24 hours.
+   * / A 5% platform fee is applied: pool pays 100 units, fee (5 units) is
+   * / distributed proportionally to all Pulse holders, claimer receives 95 units (0.0095 Pulse).
+   */
+  'claimDailyCharityPulse' : ActorMethod<
+    [],
+    { 'ok' : bigint } |
+      { 'err' : string }
+  >,
   'commentOnChannelPost' : ActorMethod<
     [ChannelPostId, string],
     ChannelCommentId
@@ -239,6 +266,16 @@ export interface _SERVICE {
   'deleteGroupName' : ActorMethod<[ConversationId], undefined>,
   'deleteHighlight' : ActorMethod<[StatusId], undefined>,
   'deleteMessage' : ActorMethod<[ConversationId, MessageId], undefined>,
+  /**
+   * / Donate Pulse to the charity pool. Minimum 100 units (0.01 Pulse at ×10000 scale).
+   * / 5% platform fee is deducted from the donated amount and distributed
+   * / proportionally to all Pulse holders. The remaining 95% enters the pool.
+   */
+  'donateToPulseCharity' : ActorMethod<
+    [bigint],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'editChannelPost' : ActorMethod<
     [ChannelPostId, ChannelPostContent],
     undefined
@@ -253,15 +290,37 @@ export interface _SERVICE {
   'getAdminTotalClaimed' : ActorMethod<[], bigint>,
   'getAllChannels' : ActorMethod<[], Array<ChannelWithMeta>>,
   'getAllStories' : ActorMethod<[], Array<[UserProfile, Array<Status>]>>,
+  /**
+   * / Returns analytics snapshots filtered to the given range.
+   * / Also triggers a new snapshot if more than 1 hour has passed since the last one.
+   * / range: "today" | "week" | "month" | "alltime"
+   */
+  'getAnalyticsTrend' : ActorMethod<[string], Array<AnalyticsSnapshot>>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
   'getCallerUserRole' : ActorMethod<[], UserRole>,
   'getChannel' : ActorMethod<[ChannelId], [] | [ChannelWithMeta]>,
+  /**
+   * / Returns follower count snapshots for the given channel.
+   * / Only the channel owner may call this.
+   */
+  'getChannelFollowerHistory' : ActorMethod<
+    [ChannelId],
+    Array<FollowerSnapshot>
+  >,
   'getChannelPostInteractions' : ActorMethod<
     [ChannelPostId],
     ChannelPostInteractions
   >,
   'getChannelPosts' : ActorMethod<[ChannelId], Array<ChannelPost>>,
   'getChannelsByCategory' : ActorMethod<[string], Array<ChannelWithMeta>>,
+  /**
+   * / Returns the caller's last charity claim timestamp (null if never claimed).
+   */
+  'getCharityLastClaim' : ActorMethod<[], [] | [bigint]>,
+  /**
+   * / Returns the current charity pool balance in raw units.
+   */
+  'getCharityPoolBalance' : ActorMethod<[], bigint>,
   'getContactStatuses' : ActorMethod<[], Array<[UserProfile, Array<Status>]>>,
   'getConversation' : ActorMethod<[ConversationId], [] | [Conversation]>,
   'getGroupAvatars' : ActorMethod<[], Array<[ConversationId, string]>>,
@@ -277,16 +336,29 @@ export interface _SERVICE {
   >,
   'getMessages' : ActorMethod<[ConversationId, bigint, bigint], Array<Message>>,
   'getMyBlockedUsers' : ActorMethod<[], Array<UserProfile>>,
+  /**
+   * / Returns (channelId, currentFollowerCount) for all channels owned by the caller.
+   */
+  'getMyChannelFollowerCounts' : ActorMethod<[], Array<[string, bigint]>>,
   'getMyConversations' : ActorMethod<[], Array<Conversation>>,
   'getMyGoldBalance' : ActorMethod<[], bigint>,
   'getMyGoldTransactions' : ActorMethod<[], Array<GoldTransaction>>,
   'getMyNotifications' : ActorMethod<[], Array<AppNotification>>,
+  /**
+   * / Returns the number of times the caller's profile has been viewed.
+   */
+  'getMyProfileViewCount' : ActorMethod<[], bigint>,
   'getMyStatuses' : ActorMethod<[], Array<Status>>,
   'getMyTransactionHistory' : ActorMethod<[], Array<GoldTransaction>>,
+  'getOnlineUsers' : ActorMethod<[], Array<OnlineUser>>,
   'getPaginatedMessages' : ActorMethod<
     [ConversationId, bigint, bigint],
     Array<Message>
   >,
+  /**
+   * / Returns the total number of profile views for a given userId (by username).
+   */
+  'getProfileViewCount' : ActorMethod<[string], bigint>,
   'getStatusInteractions' : ActorMethod<[StatusId], StatusInteractions>,
   'getStoryViewers' : ActorMethod<[StatusId], Array<string>>,
   'getStoryViewersList' : ActorMethod<[StatusId], Array<string>>,
@@ -302,6 +374,20 @@ export interface _SERVICE {
   'getTypingUsers' : ActorMethod<[ConversationId], Array<string>>,
   'getUnreadCount' : ActorMethod<[ConversationId], bigint>,
   'getUserByPrincipal' : ActorMethod<[UserId], [] | [UserProfile]>,
+  /**
+   * / Returns a user's basic profile by username (for Online Now avatars, etc.)
+   */
+  'getUserByUsername' : ActorMethod<
+    [string],
+    [] | [
+      {
+        'id' : Principal,
+        'username' : string,
+        'displayName' : string,
+        'avatarUrl' : [] | [string],
+      }
+    ]
+  >,
   'getUserChannelsCreated' : ActorMethod<[], bigint>,
   'getUserMessageCount' : ActorMethod<[], bigint>,
   'getUserProfile' : ActorMethod<[UserId], [] | [UserProfile]>,
@@ -348,6 +434,10 @@ export interface _SERVICE {
       { 'err' : string }
   >,
   'recordChannelPostView' : ActorMethod<[ChannelPostId], undefined>,
+  /**
+   * / Record that the caller viewed profileUserId's profile. Self-views are skipped.
+   */
+  'recordProfileView' : ActorMethod<[string], undefined>,
   'recordStoryView' : ActorMethod<[StatusId], undefined>,
   'removeFromHighlights' : ActorMethod<
     [StatusId],

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import AuthScreen from "./components/AuthScreen";
 import MainLayout from "./components/MainLayout";
 import PWAInstallBanner from "./components/PWAInstallBanner";
+import PaymentPage from "./components/PaymentPage";
 import ProfileSetupModal from "./components/ProfileSetupModal";
 import { useGetCallerUserProfile } from "./hooks/useQueries";
 
@@ -31,6 +32,16 @@ export default function App() {
     return match ? decodeURIComponent(match[1]) : null;
   });
 
+  // Parse /pay/:username route
+  const payRoute = (() => {
+    const match = window.location.pathname.match(/^\/pay\/([^/]+)$/);
+    if (!match) return null;
+    const username = decodeURIComponent(match[1]);
+    const params = new URLSearchParams(window.location.search);
+    const amount = params.get("amount") ?? "";
+    return { username, amount };
+  })();
+
   useEffect(() => {
     document.documentElement.classList.add("dark");
   }, []);
@@ -51,6 +62,29 @@ export default function App() {
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </div>
+    );
+  }
+
+  // Render pay page standalone (no auth required to view, but login required to send)
+  if (payRoute) {
+    return (
+      <>
+        <Toaster
+          theme="dark"
+          toastOptions={{
+            style: {
+              background: "oklch(0.11 0.007 55)",
+              border: "1px solid oklch(0.20 0.008 55)",
+              color: "oklch(0.92 0.01 70)",
+            },
+          }}
+        />
+        <PaymentPage
+          username={payRoute.username}
+          defaultAmount={payRoute.amount}
+          onBack={() => window.history.back()}
+        />
+      </>
     );
   }
 

@@ -79,6 +79,19 @@ export const Status = IDL.Record({
   'author' : UserId,
   'timestamp' : Timestamp,
 });
+export const AnalyticsSnapshot = IDL.Record({
+  'activeUsers' : IDL.Nat,
+  'channelsCreated' : IDL.Nat,
+  'messagesSent' : IDL.Nat,
+  'storiesPosted' : IDL.Nat,
+  'timestamp' : IDL.Int,
+  'totalUsers' : IDL.Nat,
+  'goldVolume' : IDL.Float64,
+});
+export const FollowerSnapshot = IDL.Record({
+  'count' : IDL.Nat,
+  'timestamp' : IDL.Int,
+});
 export const ChannelCommentWithProfile = IDL.Record({
   'id' : ChannelCommentId,
   'text' : IDL.Text,
@@ -177,6 +190,13 @@ export const AppNotification = IDL.Record({
   'read' : IDL.Bool,
   'timestamp' : Timestamp,
 });
+export const OnlineUser = IDL.Record({
+  'username' : IDL.Text,
+  'displayName' : IDL.Text,
+  'userId' : UserId,
+  'avatarUrl' : IDL.Opt(IDL.Text),
+  'lastSeen' : Timestamp,
+});
 export const StatusCommentWithProfile = IDL.Record({
   'id' : CommentId,
   'text' : IDL.Text,
@@ -238,6 +258,11 @@ export const idlService = IDL.Service({
   'adminClaimGold' : IDL.Func([IDL.Nat], [], []),
   'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
   'blockUser' : IDL.Func([UserId], [], []),
+  'claimDailyCharityPulse' : IDL.Func(
+      [],
+      [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
+      [],
+    ),
   'commentOnChannelPost' : IDL.Func(
       [ChannelPostId, IDL.Text],
       [ChannelCommentId],
@@ -260,6 +285,11 @@ export const idlService = IDL.Service({
   'deleteGroupName' : IDL.Func([ConversationId], [], []),
   'deleteHighlight' : IDL.Func([StatusId], [], []),
   'deleteMessage' : IDL.Func([ConversationId, MessageId], [], []),
+  'donateToPulseCharity' : IDL.Func(
+      [IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'editChannelPost' : IDL.Func([ChannelPostId, ChannelPostContent], [], []),
   'editMessage' : IDL.Func([ConversationId, MessageId, IDL.Text], [], []),
   'followChannel' : IDL.Func([ChannelId], [], []),
@@ -276,9 +306,15 @@ export const idlService = IDL.Service({
       [IDL.Vec(IDL.Tuple(UserProfile, IDL.Vec(Status)))],
       ['query'],
     ),
+  'getAnalyticsTrend' : IDL.Func([IDL.Text], [IDL.Vec(AnalyticsSnapshot)], []),
   'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
   'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
   'getChannel' : IDL.Func([ChannelId], [IDL.Opt(ChannelWithMeta)], ['query']),
+  'getChannelFollowerHistory' : IDL.Func(
+      [ChannelId],
+      [IDL.Vec(FollowerSnapshot)],
+      ['query'],
+    ),
   'getChannelPostInteractions' : IDL.Func(
       [ChannelPostId],
       [ChannelPostInteractions],
@@ -290,6 +326,8 @@ export const idlService = IDL.Service({
       [IDL.Vec(ChannelWithMeta)],
       ['query'],
     ),
+  'getCharityLastClaim' : IDL.Func([], [IDL.Opt(IDL.Int)], ['query']),
+  'getCharityPoolBalance' : IDL.Func([], [IDL.Nat], ['query']),
   'getContactStatuses' : IDL.Func(
       [],
       [IDL.Vec(IDL.Tuple(UserProfile, IDL.Vec(Status)))],
@@ -327,21 +365,29 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'getMyBlockedUsers' : IDL.Func([], [IDL.Vec(UserProfile)], ['query']),
+  'getMyChannelFollowerCounts' : IDL.Func(
+      [],
+      [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Nat))],
+      ['query'],
+    ),
   'getMyConversations' : IDL.Func([], [IDL.Vec(Conversation)], ['query']),
   'getMyGoldBalance' : IDL.Func([], [IDL.Nat], ['query']),
   'getMyGoldTransactions' : IDL.Func([], [IDL.Vec(GoldTransaction)], ['query']),
   'getMyNotifications' : IDL.Func([], [IDL.Vec(AppNotification)], ['query']),
+  'getMyProfileViewCount' : IDL.Func([], [IDL.Nat], ['query']),
   'getMyStatuses' : IDL.Func([], [IDL.Vec(Status)], ['query']),
   'getMyTransactionHistory' : IDL.Func(
       [],
       [IDL.Vec(GoldTransaction)],
       ['query'],
     ),
+  'getOnlineUsers' : IDL.Func([], [IDL.Vec(OnlineUser)], ['query']),
   'getPaginatedMessages' : IDL.Func(
       [ConversationId, IDL.Nat, IDL.Nat],
       [IDL.Vec(Message)],
       ['query'],
     ),
+  'getProfileViewCount' : IDL.Func([IDL.Text], [IDL.Nat], ['query']),
   'getStatusInteractions' : IDL.Func(
       [StatusId],
       [StatusInteractions],
@@ -366,6 +412,20 @@ export const idlService = IDL.Service({
   'getTypingUsers' : IDL.Func([ConversationId], [IDL.Vec(IDL.Text)], ['query']),
   'getUnreadCount' : IDL.Func([ConversationId], [IDL.Nat], ['query']),
   'getUserByPrincipal' : IDL.Func([UserId], [IDL.Opt(UserProfile)], ['query']),
+  'getUserByUsername' : IDL.Func(
+      [IDL.Text],
+      [
+        IDL.Opt(
+          IDL.Record({
+            'id' : IDL.Principal,
+            'username' : IDL.Text,
+            'displayName' : IDL.Text,
+            'avatarUrl' : IDL.Opt(IDL.Text),
+          })
+        ),
+      ],
+      ['query'],
+    ),
   'getUserChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
   'getUserMessageCount' : IDL.Func([], [IDL.Nat], ['query']),
   'getUserProfile' : IDL.Func([UserId], [IDL.Opt(UserProfile)], ['query']),
@@ -407,6 +467,7 @@ export const idlService = IDL.Service({
       [],
     ),
   'recordChannelPostView' : IDL.Func([ChannelPostId], [], []),
+  'recordProfileView' : IDL.Func([IDL.Text], [], []),
   'recordStoryView' : IDL.Func([StatusId], [], []),
   'removeFromHighlights' : IDL.Func(
       [StatusId],
@@ -537,6 +598,19 @@ export const idlFactory = ({ IDL }) => {
     'author' : UserId,
     'timestamp' : Timestamp,
   });
+  const AnalyticsSnapshot = IDL.Record({
+    'activeUsers' : IDL.Nat,
+    'channelsCreated' : IDL.Nat,
+    'messagesSent' : IDL.Nat,
+    'storiesPosted' : IDL.Nat,
+    'timestamp' : IDL.Int,
+    'totalUsers' : IDL.Nat,
+    'goldVolume' : IDL.Float64,
+  });
+  const FollowerSnapshot = IDL.Record({
+    'count' : IDL.Nat,
+    'timestamp' : IDL.Int,
+  });
   const ChannelCommentWithProfile = IDL.Record({
     'id' : ChannelCommentId,
     'text' : IDL.Text,
@@ -641,6 +715,13 @@ export const idlFactory = ({ IDL }) => {
     'read' : IDL.Bool,
     'timestamp' : Timestamp,
   });
+  const OnlineUser = IDL.Record({
+    'username' : IDL.Text,
+    'displayName' : IDL.Text,
+    'userId' : UserId,
+    'avatarUrl' : IDL.Opt(IDL.Text),
+    'lastSeen' : Timestamp,
+  });
   const StatusCommentWithProfile = IDL.Record({
     'id' : CommentId,
     'text' : IDL.Text,
@@ -702,6 +783,11 @@ export const idlFactory = ({ IDL }) => {
     'adminClaimGold' : IDL.Func([IDL.Nat], [], []),
     'assignCallerUserRole' : IDL.Func([IDL.Principal, UserRole], [], []),
     'blockUser' : IDL.Func([UserId], [], []),
+    'claimDailyCharityPulse' : IDL.Func(
+        [],
+        [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
+        [],
+      ),
     'commentOnChannelPost' : IDL.Func(
         [ChannelPostId, IDL.Text],
         [ChannelCommentId],
@@ -724,6 +810,11 @@ export const idlFactory = ({ IDL }) => {
     'deleteGroupName' : IDL.Func([ConversationId], [], []),
     'deleteHighlight' : IDL.Func([StatusId], [], []),
     'deleteMessage' : IDL.Func([ConversationId, MessageId], [], []),
+    'donateToPulseCharity' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'editChannelPost' : IDL.Func([ChannelPostId, ChannelPostContent], [], []),
     'editMessage' : IDL.Func([ConversationId, MessageId, IDL.Text], [], []),
     'followChannel' : IDL.Func([ChannelId], [], []),
@@ -740,9 +831,19 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(IDL.Tuple(UserProfile, IDL.Vec(Status)))],
         ['query'],
       ),
+    'getAnalyticsTrend' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(AnalyticsSnapshot)],
+        [],
+      ),
     'getCallerUserProfile' : IDL.Func([], [IDL.Opt(UserProfile)], ['query']),
     'getCallerUserRole' : IDL.Func([], [UserRole], ['query']),
     'getChannel' : IDL.Func([ChannelId], [IDL.Opt(ChannelWithMeta)], ['query']),
+    'getChannelFollowerHistory' : IDL.Func(
+        [ChannelId],
+        [IDL.Vec(FollowerSnapshot)],
+        ['query'],
+      ),
     'getChannelPostInteractions' : IDL.Func(
         [ChannelPostId],
         [ChannelPostInteractions],
@@ -758,6 +859,8 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(ChannelWithMeta)],
         ['query'],
       ),
+    'getCharityLastClaim' : IDL.Func([], [IDL.Opt(IDL.Int)], ['query']),
+    'getCharityPoolBalance' : IDL.Func([], [IDL.Nat], ['query']),
     'getContactStatuses' : IDL.Func(
         [],
         [IDL.Vec(IDL.Tuple(UserProfile, IDL.Vec(Status)))],
@@ -795,6 +898,11 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'getMyBlockedUsers' : IDL.Func([], [IDL.Vec(UserProfile)], ['query']),
+    'getMyChannelFollowerCounts' : IDL.Func(
+        [],
+        [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Nat))],
+        ['query'],
+      ),
     'getMyConversations' : IDL.Func([], [IDL.Vec(Conversation)], ['query']),
     'getMyGoldBalance' : IDL.Func([], [IDL.Nat], ['query']),
     'getMyGoldTransactions' : IDL.Func(
@@ -803,17 +911,20 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'getMyNotifications' : IDL.Func([], [IDL.Vec(AppNotification)], ['query']),
+    'getMyProfileViewCount' : IDL.Func([], [IDL.Nat], ['query']),
     'getMyStatuses' : IDL.Func([], [IDL.Vec(Status)], ['query']),
     'getMyTransactionHistory' : IDL.Func(
         [],
         [IDL.Vec(GoldTransaction)],
         ['query'],
       ),
+    'getOnlineUsers' : IDL.Func([], [IDL.Vec(OnlineUser)], ['query']),
     'getPaginatedMessages' : IDL.Func(
         [ConversationId, IDL.Nat, IDL.Nat],
         [IDL.Vec(Message)],
         ['query'],
       ),
+    'getProfileViewCount' : IDL.Func([IDL.Text], [IDL.Nat], ['query']),
     'getStatusInteractions' : IDL.Func(
         [StatusId],
         [StatusInteractions],
@@ -851,6 +962,20 @@ export const idlFactory = ({ IDL }) => {
     'getUserByPrincipal' : IDL.Func(
         [UserId],
         [IDL.Opt(UserProfile)],
+        ['query'],
+      ),
+    'getUserByUsername' : IDL.Func(
+        [IDL.Text],
+        [
+          IDL.Opt(
+            IDL.Record({
+              'id' : IDL.Principal,
+              'username' : IDL.Text,
+              'displayName' : IDL.Text,
+              'avatarUrl' : IDL.Opt(IDL.Text),
+            })
+          ),
+        ],
         ['query'],
       ),
     'getUserChannelsCreated' : IDL.Func([], [IDL.Nat], ['query']),
@@ -894,6 +1019,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'recordChannelPostView' : IDL.Func([ChannelPostId], [], []),
+    'recordProfileView' : IDL.Func([IDL.Text], [], []),
     'recordStoryView' : IDL.Func([StatusId], [], []),
     'removeFromHighlights' : IDL.Func(
         [StatusId],

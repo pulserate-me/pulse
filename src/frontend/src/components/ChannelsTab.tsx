@@ -207,12 +207,14 @@ function ChannelCard({
 
 interface ChannelsTabProps {
   currentUserId: string;
+  enabled?: boolean;
   onSelectChannel: (id: ChannelId) => void;
   onAvatarClick: (userId: string) => void;
 }
 
 export default function ChannelsTab({
   currentUserId,
+  enabled = true,
   onSelectChannel,
   onAvatarClick,
 }: ChannelsTabProps) {
@@ -220,7 +222,7 @@ export default function ChannelsTab({
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [createOpen, setCreateOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const { data: channels = [], isLoading } = useGetAllChannels();
+  const { data: channels = [], isLoading } = useGetAllChannels(enabled);
 
   const filtered = channels.filter((c) => {
     const matchesSearch =

@@ -22,7 +22,7 @@ function formatRelativeTime(ts: bigint): string {
 }
 
 function formatGoldAmount(amount: bigint): string {
-  return (Number(amount) / 100).toFixed(2);
+  return (Number(amount) / 10000).toFixed(4);
 }
 
 function getNotificationMessage(kind: AppNotification["kind"]): {
@@ -32,7 +32,7 @@ function getNotificationMessage(kind: AppNotification["kind"]): {
   if ("goldGifted" in kind) {
     return {
       icon: "✦",
-      message: `${kind.goldGifted.fromUsername} gifted you ${formatGoldAmount(kind.goldGifted.amount)} Gold`,
+      message: `${kind.goldGifted.fromUsername} gifted you ${formatGoldAmount(kind.goldGifted.amount)} Pulse`,
     };
   }
   if ("storyLiked" in kind) {

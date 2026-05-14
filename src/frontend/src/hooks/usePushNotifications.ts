@@ -9,10 +9,10 @@ function formatNotificationContent(kind: AppNotification["kind"]): {
   body: string;
 } {
   if ("goldGifted" in kind) {
-    const amount = (Number(kind.goldGifted.amount) / 100).toFixed(2);
+    const amount = (Number(kind.goldGifted.amount) / 10000).toFixed(4);
     return {
-      title: "Gold Received ✦",
-      body: `${kind.goldGifted.fromUsername} gifted you ${amount} Gold`,
+      title: "Pulse Received ✦",
+      body: `${kind.goldGifted.fromUsername} gifted you ${amount} Pulse`,
     };
   }
   if ("storyLiked" in kind) {

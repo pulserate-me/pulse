@@ -307,8 +307,11 @@ function HighlightViewer({
         </div>
       )}
 
-      {/* Content */}
-      <div className="flex-1 relative flex flex-col items-center justify-center overflow-hidden">
+      {/* Content — fixed height so media never compresses */}
+      <div
+        className="shrink-0 relative flex flex-col items-center justify-center overflow-hidden"
+        style={{ height: "60vh" }}
+      >
         {index > 0 && (
           <button
             type="button"
@@ -328,7 +331,7 @@ function HighlightViewer({
           <img
             src={story.content.mediaUrl}
             alt="Highlight"
-            className="max-w-full max-h-[72vh] object-contain rounded-xl relative z-20"
+            className="max-w-full max-h-full object-contain rounded-xl relative z-20"
           />
         )}
 
@@ -341,7 +344,7 @@ function HighlightViewer({
             loop
             playsInline
             controls
-            className="max-w-full max-h-[72vh] object-contain rounded-xl relative z-20"
+            className="max-w-full max-h-full object-contain rounded-xl relative z-20"
           />
         )}
 

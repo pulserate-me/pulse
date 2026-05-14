@@ -8,7 +8,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { type ChangeEvent, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useMediaUpload } from "../hooks/useMediaUpload";
 import { useAddStatus } from "../hooks/useQueries";
@@ -22,9 +22,32 @@ export default function AddStatusModal({
   open,
   onOpenChange,
 }: AddStatusModalProps) {
+  const MAX_CAPTION_WORDS = 19;
+
   const [tab, setTab] = useState("image");
   const [caption, setCaption] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+
+  const countWords = (text: string): number => {
+    const trimmed = text.trim();
+    if (!trimmed) return 0;
+    return trimmed.split(/\s+/).length;
+  };
+
+  const handleCaptionChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    const raw = e.target.value;
+    // Allow typing spaces/newlines at the end (don't prematurely block mid-word)
+    // but enforce the word limit once a new word would exceed MAX_CAPTION_WORDS
+    const words = raw.trim().split(/\s+/).filter(Boolean);
+    if (words.length > MAX_CAPTION_WORDS) {
+      // Trim to exactly MAX_CAPTION_WORDS words, preserving the join spacing
+      setCaption(words.slice(0, MAX_CAPTION_WORDS).join(" "));
+    } else {
+      setCaption(raw);
+    }
+  };
+
+  const wordCount = countWords(caption);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { mutateAsync: addStatus, isPending } = useAddStatus();
@@ -135,12 +158,27 @@ export default function AddStatusModal({
               </Button>
               <Textarea
                 data-ocid="status.textarea"
-                placeholder="Add a caption (optional)"
+                placeholder="Add a caption (optional, max 19 words)"
                 value={caption}
-                onChange={(e) => setCaption(e.target.value)}
+                onChange={handleCaptionChange}
                 className="bg-input border-border resize-none h-16"
                 maxLength={200}
               />
+              <p className="text-xs text-muted-foreground text-right -mt-1">
+                <span
+                  style={{
+                    color:
+                      wordCount >= MAX_CAPTION_WORDS
+                        ? "oklch(0.82 0.15 72)"
+                        : undefined,
+                    fontWeight:
+                      wordCount >= MAX_CAPTION_WORDS ? 600 : undefined,
+                  }}
+                >
+                  {wordCount}
+                </span>
+                /{MAX_CAPTION_WORDS} words
+              </p>
             </TabsContent>
           ))}
         </Tabs>

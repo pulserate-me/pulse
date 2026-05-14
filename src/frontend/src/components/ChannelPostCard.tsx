@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useIcpPrice } from "../hooks/useIcpPrice";
 import {
   useCommentOnChannelPost,
   useDeleteChannelPost,
@@ -264,6 +265,7 @@ export default function ChannelPostCard({
   const [giftOpen, setGiftOpen] = useState(false);
   const [giftAmount, setGiftAmount] = useState("");
   const [giftError, setGiftError] = useState("");
+  const [giftCurrency, setGiftCurrency] = useState<"gold" | "usd">("gold");
 
   const { data: interactions } = useGetChannelPostInteractions(post.id);
   const likePost = useLikeChannelPost();
@@ -274,13 +276,14 @@ export default function ChannelPostCard({
   const giftGold = useGiftGoldToPost();
   const recordView = useRecordChannelPostView();
   const { data: rawBalance } = useGetMyGoldBalance();
+  const { price: icpPrice, loading: icpPriceLoading } = useIcpPrice();
 
   const likeCount = Number(interactions?.likeCount ?? 0);
   const likedByMe = interactions?.likedByMe ?? false;
   const comments = interactions?.comments ?? [];
   const viewCount = Number(interactions?.viewCount ?? 0);
   const goldBalance =
-    rawBalance !== undefined ? Number(rawBalance) / 100 : null;
+    rawBalance !== undefined ? Number(rawBalance) / 10000 : null;
 
   // Record a view when the post card is first rendered (best-effort, non-blocking)
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs once per post
@@ -290,26 +293,51 @@ export default function ChannelPostCard({
   }, [post.id]);
 
   const handleGiftGold = async () => {
-    const amt = Number.parseFloat(giftAmount);
-    if (Number.isNaN(amt) || amt < 0.01) {
-      setGiftError("Minimum gift is 0.01 Gold");
+    const rawAmt = Number.parseFloat(giftAmount);
+    if (Number.isNaN(rawAmt) || !rawAmt) {
+      setGiftError("Please enter a valid amount");
       return;
     }
-    if (goldBalance !== null && goldBalance < amt) {
-      setGiftError("Insufficient Gold balance");
+
+    const goldAmt =
+      giftCurrency === "usd"
+        ? icpPrice != null
+          ? rawAmt / icpPrice
+          : null
+        : rawAmt;
+
+    if (goldAmt === null) {
+      setGiftError("Price unavailable, please try again");
+      return;
+    }
+
+    if (goldAmt < 0.01) {
+      if (giftCurrency === "usd" && icpPrice != null) {
+        setGiftError(
+          `Minimum gift is 0.01 Pulse (≈ $${(0.01 * icpPrice).toFixed(4)})`,
+        );
+      } else {
+        setGiftError("Minimum gift is 0.01 Pulse");
+      }
+      return;
+    }
+
+    if (goldBalance !== null && goldBalance < goldAmt) {
+      setGiftError("Insufficient Pulse balance");
       return;
     }
     setGiftError("");
     try {
       await giftGold.mutateAsync({
         postId: post.id,
-        amount: BigInt(Math.round(amt * 100)),
+        amount: BigInt(Math.round(goldAmt * 10000)),
       });
-      toast.success(`Gifted ${amt.toFixed(2)} Gold successfully!`);
+      toast.success(`Gifted ${goldAmt.toFixed(4)} Pulse successfully!`);
       setGiftOpen(false);
       setGiftAmount("");
+      setGiftCurrency("gold");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to gift Gold");
+      toast.error(err instanceof Error ? err.message : "Failed to gift Pulse");
     }
   };
 
@@ -486,7 +514,6 @@ export default function ChannelPostCard({
       {/* Video media */}
       {post.content.mediaUrl && mediaKind === "video" && (
         <div className="w-full pb-3">
-          {/* biome-ignore lint/a11y/useMediaCaption: user-uploaded content */}
           <video
             src={post.content.mediaUrl}
             controls
@@ -619,7 +646,7 @@ export default function ChannelPostCard({
               setGiftError("");
             }}
             className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-muted/50 transition-colors ml-auto"
-            aria-label="Gift Gold"
+            aria-label="Gift Pulse"
           >
             <Coins
               className="h-4 w-4"
@@ -759,6 +786,7 @@ export default function ChannelPostCard({
           if (!open) {
             setGiftAmount("");
             setGiftError("");
+            setGiftCurrency("gold");
           }
         }}
       >
@@ -775,7 +803,7 @@ export default function ChannelPostCard({
                 className="h-5 w-5"
                 style={{ color: "oklch(0.82 0.15 72)" }}
               />
-              Gift Gold
+              Gift Pulse
             </DialogTitle>
           </DialogHeader>
           {goldBalance !== null && (
@@ -785,27 +813,115 @@ export default function ChannelPostCard({
                 className="font-semibold"
                 style={{ color: "oklch(0.82 0.15 72)" }}
               >
-                {goldBalance.toFixed(2)} Gold
+                {goldBalance.toFixed(4)} Pulse
               </span>
             </p>
           )}
-          <div className="flex flex-col gap-2 mt-1">
-            <Input
-              data-ocid={`channel.post.gift.input.${ocid}`}
-              type="number"
-              min="0.01"
-              step="0.01"
-              placeholder="0.01"
-              value={giftAmount}
-              onChange={(e) => {
-                setGiftAmount(e.target.value);
+          {/* Currency toggle */}
+          <div
+            className="flex rounded-lg overflow-hidden border"
+            style={{ borderColor: "oklch(0.82 0.15 72 / 0.25)" }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setGiftCurrency("gold");
+                setGiftAmount("");
                 setGiftError("");
               }}
-              className="bg-input border-border"
-              style={{
-                borderColor: giftError ? "oklch(0.65 0.25 25)" : undefined,
+              className="flex-1 py-1.5 text-xs font-semibold transition-colors"
+              style={
+                giftCurrency === "gold"
+                  ? {
+                      background:
+                        "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                      color: "oklch(0.08 0.004 55)",
+                    }
+                  : {
+                      background: "oklch(0.10 0.01 55)",
+                      color: "oklch(0.55 0.04 55)",
+                    }
+              }
+              data-ocid={`channel.post.gift.tab_gold.${ocid}`}
+            >
+              ✦ Pulse
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setGiftCurrency("usd");
+                setGiftAmount("");
+                setGiftError("");
               }}
-            />
+              className="flex-1 py-1.5 text-xs font-semibold transition-colors"
+              style={
+                giftCurrency === "usd"
+                  ? {
+                      background:
+                        "linear-gradient(135deg, oklch(0.76 0.13 72), oklch(0.65 0.11 65))",
+                      color: "oklch(0.08 0.004 55)",
+                    }
+                  : {
+                      background: "oklch(0.10 0.01 55)",
+                      color: "oklch(0.55 0.04 55)",
+                    }
+              }
+              data-ocid={`channel.post.gift.tab_usd.${ocid}`}
+            >
+              $ USD
+            </button>
+          </div>
+          <div className="flex flex-col gap-2 mt-1">
+            <div className="relative">
+              {giftCurrency === "usd" && (
+                <span
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold pointer-events-none"
+                  style={{ color: "oklch(0.82 0.15 72)" }}
+                >
+                  $
+                </span>
+              )}
+              <Input
+                data-ocid={`channel.post.gift.input.${ocid}`}
+                type="number"
+                min="0.01"
+                step="0.0001"
+                placeholder="0.0100"
+                value={giftAmount}
+                onChange={(e) => {
+                  setGiftAmount(e.target.value);
+                  setGiftError("");
+                }}
+                className={`bg-input border-border${giftCurrency === "usd" ? " pl-7" : ""}`}
+                style={{
+                  borderColor: giftError ? "oklch(0.65 0.25 25)" : undefined,
+                }}
+              />
+            </div>
+            {/* Live equivalent */}
+            {giftAmount && !Number.isNaN(Number.parseFloat(giftAmount)) && (
+              <p className="text-xs" style={{ color: "oklch(0.65 0.05 72)" }}>
+                {icpPriceLoading ? (
+                  <span className="flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Loading price…
+                  </span>
+                ) : icpPrice != null ? (
+                  giftCurrency === "gold" ? (
+                    <>
+                      ≈ ${(Number.parseFloat(giftAmount) * icpPrice).toFixed(2)}{" "}
+                      USD
+                    </>
+                  ) : (
+                    <>
+                      ≈ {(Number.parseFloat(giftAmount) / icpPrice).toFixed(4)}{" "}
+                      Pulse
+                    </>
+                  )
+                ) : (
+                  "Price unavailable"
+                )}
+              </p>
+            )}
             {giftError && (
               <p
                 className="text-xs"
@@ -830,9 +946,18 @@ export default function ChannelPostCard({
               disabled={
                 giftGold.isPending ||
                 !giftAmount ||
-                Number.parseFloat(giftAmount) < 0.01 ||
-                (goldBalance !== null &&
-                  goldBalance < Number.parseFloat(giftAmount))
+                (icpPriceLoading && giftCurrency === "usd") ||
+                (() => {
+                  const raw = Number.parseFloat(giftAmount);
+                  if (!raw || Number.isNaN(raw)) return true;
+                  const gold =
+                    giftCurrency === "usd"
+                      ? icpPrice != null
+                        ? raw / icpPrice
+                        : null
+                      : raw;
+                  return gold === null || gold < 0.01;
+                })()
               }
               data-ocid={`channel.post.gift.submit_button.${ocid}`}
               style={{
@@ -844,7 +969,7 @@ export default function ChannelPostCard({
               {giftGold.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                "Send Gold"
+                "Send Pulse"
               )}
             </Button>
           </div>
